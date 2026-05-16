@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+crawl4ai
+anthropic
+python-dotenv
