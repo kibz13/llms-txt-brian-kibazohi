@@ -3,3 +3,6 @@ uvicorn
 crawl4ai
 anthropic
 python-dotenv
+pytest
+pytest-asyncio
+httpx
