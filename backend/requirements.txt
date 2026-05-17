@@ -1,8 +1,8 @@
 fastapi
 uvicorn
 crawl4ai
-anthropic
 python-dotenv
-pytest
-pytest-asyncio
-httpx
+sqlmodel
+asyncpg
+alembic
+anthropic

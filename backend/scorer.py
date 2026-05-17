@@ -14,6 +14,7 @@ from classifier import ClassificationResult, PageClassification, SiteClassificat
 from models import CrawledPage
 
 DROP_THRESHOLD         = 0
+OPTIONAL_THRESHOLD     = 5
 RELAXED_DROP_THRESHOLD = -3
 
 # Page types that are always dropped regardless of profile

@@ -2,7 +2,17 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
+from sqlalchemy import Column, TIMESTAMP
 from sqlmodel import Field, SQLModel
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _ts_col() -> Column:
+    """Timezone-aware timestamp column."""
+    return Column(TIMESTAMP(timezone=True), nullable=False)
 
 
 # ---------------------------------------------------------------------------
@@ -21,8 +31,8 @@ class Job(SQLModel, table=True):
     page_count: Optional[int] = None
     generation_time_ms: Optional[int] = None
 
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=_now, sa_column=_ts_col())
+    updated_at: datetime = Field(default_factory=_now, sa_column=_ts_col())
 
 
 class Page(SQLModel, table=True):
@@ -38,8 +48,8 @@ class Page(SQLModel, table=True):
     page_type: Optional[str] = None        # blog_post | guide | pricing | hero | about | faq | ...
     page_type_confidence: Optional[float] = None
 
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=_now, sa_column=_ts_col())
+    updated_at: datetime = Field(default_factory=_now, sa_column=_ts_col())
 
 
 class JobPage(SQLModel, table=True):
