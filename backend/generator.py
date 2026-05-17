@@ -76,6 +76,11 @@ INCLUSION:
 - Event pages, conference pages, time-sensitive promotional pages → ## Optional
 - Legal, login, signup, brand asset pages → ## Optional or omit entirely
 - If a page adds no value to an LLM understanding the site → omit it
+- Blog/news sections: include a maximum of 8–10 representative posts across
+  categories — do not list every post. Prefer research studies and original
+  data over commentary and opinion pieces
+- Product announcements: include only the most significant launches; omit
+  minor updates and incremental feature additions
 
 DO NOT:
 - Add pages that were not in the input
@@ -198,7 +203,10 @@ async def _call_claude(
         if not result.startswith("#"):
             logger.warning("CLAUDE  response did not start with # — discarding")
             return None
-        logger.info("CLAUDE  success (%d chars)", len(result))
+        logger.info(
+            "CLAUDE  success  chars=%d  tokens_in=%d  tokens_out=%d",
+            len(result), message.usage.input_tokens, message.usage.output_tokens,
+        )
         return result
     except Exception as exc:
         logger.warning("CLAUDE  call failed: %s — using heuristic fallback", exc)

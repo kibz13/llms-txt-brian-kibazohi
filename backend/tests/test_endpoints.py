@@ -94,8 +94,8 @@ def test_get_job_not_found():
     assert response.status_code == 404
 
 
-def test_get_job_processing_returns_status():
-    job = Job(id=uuid4(), url="https://example.com", status="processing")
+def test_get_job_crawling_returns_status():
+    job = Job(id=uuid4(), url="https://example.com", status="crawling")
     app.dependency_overrides[get_session] = session_override(job=job)
     try:
         response = client.get(f"/jobs/{job.id}")
@@ -104,7 +104,7 @@ def test_get_job_processing_returns_status():
 
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "processing"
+    assert data["status"] == "crawling"
     assert data["job_id"] == str(job.id)
     assert "result" not in data
 
@@ -132,11 +132,11 @@ def test_get_job_done_returns_result():
     assert data["site_type"] == "saas"
 
 
-def test_get_job_failed_returns_error():
+def test_get_job_error_returns_error():
     job = Job(
         id=uuid4(),
         url="https://example.com",
-        status="failed",
+        status="error",
         error="Crawl timed out",
     )
     app.dependency_overrides[get_session] = session_override(job=job)
@@ -147,7 +147,7 @@ def test_get_job_failed_returns_error():
 
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "failed"
+    assert data["status"] == "error"
     assert data["error"] == "Crawl timed out"
 
 

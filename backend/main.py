@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from pydantic import field_validator
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -49,6 +50,14 @@ app.add_middleware(
 
 class JobRequest(BaseModel):
     url: str
+    depth: int = 2
+
+    @field_validator("depth")
+    @classmethod
+    def validate_depth(cls, v: int) -> int:
+        if v < 1 or v > 5:
+            raise ValueError("depth must be between 1 and 5")
+        return v
 
 
 class CrawlRequest(BaseModel):
@@ -98,7 +107,7 @@ async def _upsert_page(session: AsyncSession, page, page_clf) -> UUID:
 # Background job processor
 # ---------------------------------------------------------------------------
 
-async def _process_job(job_id: UUID, url: str) -> None:
+async def _process_job(job_id: UUID, url: str, depth: int) -> None:
     _, session_factory = get_engine()
     async with session_factory() as session:
         job = await session.get(Job, job_id)
@@ -108,7 +117,7 @@ async def _process_job(job_id: UUID, url: str) -> None:
             await session.commit()
 
             start        = time.time()
-            crawl_result = await crawl(url, CRAWL_DEPTH)
+            crawl_result = await crawl(url, depth)
             raw_pages    = crawl_result.pages
 
             # Deduplicate by content hash (same logic as generator.py)
@@ -190,7 +199,7 @@ async def create_job(
     await session.commit()
     await session.refresh(job)
 
-    background_tasks.add_task(_process_job, job.id, body.url)
+    background_tasks.add_task(_process_job, job.id, body.url, body.depth)
 
     return JobQueued(job_id=job.id, status=job.status)
 
