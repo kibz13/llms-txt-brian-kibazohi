@@ -24,7 +24,7 @@ class Job(SQLModel, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     url: str
-    status: str = Field(default="queued")  # queued | processing | done | failed
+    status: str = Field(default="queued")  # queued | crawling | generating | done | error
     result: Optional[str] = None           # llms.txt output
     error: Optional[str] = None
     site_type: Optional[str] = None        # blog | documentation | saas | e-commerce | portfolio | news | other

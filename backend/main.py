@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +34,13 @@ APP_ENV     = os.getenv("APP_ENV", "development")
 CRAWL_DEPTH = int(os.getenv("CRAWL4AI_DEPTH", "2"))
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:3000").split(","),
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +103,7 @@ async def _process_job(job_id: UUID, url: str) -> None:
     async with session_factory() as session:
         job = await session.get(Job, job_id)
         try:
-            job.status     = "processing"
+            job.status     = "crawling"
             job.updated_at = _now()
             await session.commit()
 
@@ -114,6 +122,10 @@ async def _process_job(job_id: UUID, url: str) -> None:
             # Classify once — used for DB persistence and passed implicitly to generate()
             classification = classify(unique)
             site_type      = classification.site.primary_type
+
+            job.status     = "generating"
+            job.updated_at = _now()
+            await session.commit()
 
             # Generate llms.txt (runs classify/score internally — accepted MVP redundancy)
             llms_txt      = await generate(raw_pages)
@@ -143,7 +155,7 @@ async def _process_job(job_id: UUID, url: str) -> None:
 
         except Exception as exc:
             logger.exception("JOB %s failed", job_id)
-            job.status     = "failed"
+            job.status     = "error"
             job.error      = str(exc)
             job.updated_at = _now()
             await session.commit()
