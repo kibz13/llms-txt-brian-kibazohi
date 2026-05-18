@@ -43,10 +43,10 @@ class Page(SQLModel, table=True):
     domain: str = Field(default="")
     title: Optional[str] = None
     description: Optional[str] = None
-    content_hash: Optional[str] = None     # SHA-256 — change detection only, content never stored
-
     page_type: Optional[str] = None        # blog_post | guide | pricing | hero | about | faq | ...
     page_type_confidence: Optional[float] = None
+    etag: Optional[str] = None             # HTTP ETag for change detection
+    last_modified: Optional[str] = None    # HTTP Last-Modified for change detection
 
     created_at: datetime = Field(default_factory=_now, sa_column=_ts_col())
     updated_at: datetime = Field(default_factory=_now, sa_column=_ts_col())
@@ -60,18 +60,32 @@ class JobPage(SQLModel, table=True):
     rank: Optional[int] = None             # position in final llms.txt (1 = most important)
 
 
+class Domain(SQLModel, table=True):
+    __tablename__ = "domains"
+
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    base_url: str = Field(unique=True)
+    domain: str
+    monitoring_enabled: bool = Field(default=True)
+    last_checked_at: Optional[datetime] = None
+    last_job_id: Optional[UUID] = Field(default=None, foreign_key="jobs.id")
+    sitemap_hash: Optional[str] = None     # SHA256 of raw sitemap XML for change detection
+
+    created_at: datetime = Field(default_factory=_now, sa_column=_ts_col())
+    updated_at: datetime = Field(default_factory=_now, sa_column=_ts_col())
+
+
 # ---------------------------------------------------------------------------
 # Transient schemas (crawler output — not persisted directly)
 # ---------------------------------------------------------------------------
 
 class CrawledPage(SQLModel):
     """Ephemeral page data produced by the crawler.
-    content is used in-memory for hashing, classification, and scoring — never persisted."""
+    content is used in-memory for classification and scoring — never persisted."""
     url: str
     title: str
     description: str
-    content: str        # transient — discarded after hash + classification
-    content_hash: str   # SHA-256 of content
+    content: str        # transient — discarded after classification
     depth: int
 
 
@@ -80,7 +94,6 @@ class CrawledPagePublic(SQLModel):
     url: str
     title: str
     description: str
-    content_hash: str
 
 
 class CrawlResult(SQLModel):

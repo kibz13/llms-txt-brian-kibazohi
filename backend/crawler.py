@@ -1,11 +1,10 @@
 import asyncio
-import hashlib
 import json
 import logging
 import re
 import sys
 from datetime import datetime, timezone
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 from xml.etree import ElementTree as ET
 
 import httpx
@@ -22,6 +21,36 @@ SKIP_PATTERNS = re.compile(
     r"(/cdn-cgi/|\.pdf$|\.jpg$|\.jpeg$|\.png$|\.gif$|\.svg$|\.ico$|#)",
     re.IGNORECASE,
 )
+
+# Paths that are never useful to an LLM — skipped before any crawl request is made.
+PATH_BLACKLIST = (
+    # Metadata & taxonomy hubs
+    "/tag/", "/tags/", "/category/", "/categories/", "/archive/", "/archives/",
+    "/author/", "/authors/", "/topic/", "/topics/", "/labels/",
+    # Structural noise
+    "/page/", "/pages/", "/search", "/query", "/feed/", "/rss",
+    # Auth & account
+    "/login", "/signup", "/register", "/signin", "/logout", "/profile",
+    "/settings", "/cart", "/checkout", "/billing",
+    # Legal & footers
+    "/privacy", "/privacy-policy", "/terms", "/tos", "/cookie-policy",
+    "/legal", "/license", "/dpa",
+    # App shell & admin (login-walled, no useful content for LLMs)
+    "/dashboard", "/app/", "/console", "/admin",
+)
+
+# Query parameters that indicate duplicate content, pagination, tracking, or UI state.
+# Any URL whose query string contains one of these keys is skipped.
+QUERY_PARAM_BLACKLIST = frozenset({
+    # Pagination
+    "page", "p", "offset", "cursor", "limit", "start",
+    # Sorting & filtering
+    "sort", "order", "orderby", "filter", "category", "tag", "view",
+    # Tracking & sessions
+    "gclid", "session", "sid", "ph",
+    # Actions
+    "action", "replytocom", "share", "print",
+})
 
 _CRAWL_CONFIG = CrawlerRunConfig(
     # Wait for any common content container before extracting text.
@@ -194,8 +223,28 @@ def same_domain(base: str, url: str) -> bool:
     return urlparse(url).netloc == urlparse(base).netloc
 
 
+def _path_blacklisted(path: str) -> bool:
+    for entry in PATH_BLACKLIST:
+        prefix = entry if entry.endswith("/") else entry + "/"
+        exact  = entry.rstrip("/")
+        if path == exact or path.startswith(prefix):
+            return True
+    return False
+
+
 def should_skip(url: str) -> bool:
-    return bool(SKIP_PATTERNS.search(url))
+    if SKIP_PATTERNS.search(url):
+        return True
+    parsed = urlparse(url)
+    if _path_blacklisted(parsed.path):
+        return True
+    if parsed.query:
+        params = {k.lower() for k in parse_qs(parsed.query)}
+        if params & QUERY_PARAM_BLACKLIST:
+            return True
+        if any(k.startswith("utm_") for k in params):
+            return True
+    return False
 
 
 def extract_title(result) -> str:
@@ -259,13 +308,11 @@ def _process_results(
             logger.warning("CRAWL  failed %s", u)
             continue
 
-        content = result.markdown or ""
         pages.append(CrawledPage(
             url=u,
             title=extract_title(result),
             description=extract_description(result),
-            content=content,
-            content_hash=hashlib.sha256(content.encode()).hexdigest(),
+            content=result.markdown or "",
             depth=depth,
         ))
 

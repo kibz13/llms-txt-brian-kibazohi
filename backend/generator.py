@@ -159,7 +159,6 @@ def prepare_for_claude(scored_pages: list[ScoredPage], base_url: str) -> list[di
 
 async def _call_claude(
     pages: list[dict],
-    site_type: str,
     homepage: CrawledPage,
 ) -> str | None:
     """
@@ -181,7 +180,6 @@ async def _call_claude(
     homepage_excerpt = " ".join(homepage.content.split()[:200])
 
     user_message = (
-        f"Site type: {site_type}\n"
         f"Homepage title: {homepage.title}\n"
         f"Homepage description: {sanitise_description(homepage.description) or '(none)'}\n"
         f"Homepage excerpt (first 200 words):\n{homepage_excerpt}\n\n"
@@ -190,7 +188,7 @@ async def _call_claude(
         f"Generate the llms.txt file for this site."
     )
 
-    logger.info("CLAUDE  sending %d pages (site_type=%s)", len(pages), site_type)
+    logger.info("CLAUDE  sending %d pages", len(pages))
 
     try:
         message = await client.messages.create(
@@ -310,30 +308,13 @@ async def generate(pages: list[CrawledPage]) -> str:
     base_url    = homepage.url
     base_domain = urlparse(base_url).netloc
 
-    # Deduplicate by content hash
-    seen: set[str] = set()
-    unique: list[CrawledPage] = []
-    for page in pages:
-        if page.content_hash in seen:
-            logger.debug("DEDUP  %s", page.url)
-            continue
-        seen.add(page.content_hash)
-        unique.append(page)
+    logger.info("CLASSIFY  %d pages", len(pages))
 
-    logger.info("CLASSIFY  %d unique pages (%d dupes dropped)", len(unique), len(pages) - len(unique))
+    classification = classify(pages)
+    scored         = score_all(pages, classification, base_url)
+    prepared       = prepare_for_claude(scored, base_url)
 
-    classification = classify(unique)
-    site = classification.site
-    logger.info(
-        "SITE  primary=%s  confidence=%s",
-        site.primary_type,
-        {k: f"{v:.2f}" for k, v in site.confidence.items()},
-    )
-
-    scored  = score_all(unique, classification, base_url)
-    prepared = prepare_for_claude(scored, base_url)
-
-    result = await _call_claude(prepared, site.primary_type, homepage)
+    result = await _call_claude(prepared, homepage)
     if result:
         return result
 

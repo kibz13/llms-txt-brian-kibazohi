@@ -1,77 +1,33 @@
 """
-Profile-based page scoring.
+Page scoring.
 
 Scorer's only job: decide which pages are valuable and how valuable.
 Section assignment and grouping is handled by the generator.
 
-Hard-drop:  legal, dashboard — universally low value
-Profiles:   documentation | blog | news | saas | e-commerce | portfolio | other
+Scores are universal — not profile-dependent.
 """
 
 from dataclasses import dataclass
 
-from classifier import ClassificationResult, PageClassification, SiteClassification
+from classifier import PageClassification
 from models import CrawledPage
 
 DROP_THRESHOLD         = 0
 OPTIONAL_THRESHOLD     = 5
 RELAXED_DROP_THRESHOLD = -3
 
-# Page types that are always dropped regardless of profile
-_HARD_DROP_TYPES = {"legal", "dashboard"}
-
-# Base score per page_type per profile
-_PROFILE_SCORES: dict[str, dict[str, int]] = {
-    "documentation": {
-        "guide":     10,
-        "faq":        8,
-        "about":      5,
-        "product":    3,
-        "pricing":    3,
-        "contact":    2,
-        "blog_post":  2,
-    },
-    "blog": {
-        "blog_post": 10,
-        "guide":      8,
-        "about":      5,
-        "faq":        3,
-        "contact":    2,
-    },
-    "news": {
-        "blog_post": 10,
-        "about":      5,
-        "faq":        3,
-        "contact":    2,
-    },
-    "saas": {
-        "pricing":   10,
-        "product":    8,
-        "about":      5,
-        "contact":    5,
-        "guide":      4,
-        "faq":        4,
-        "blog_post":  2,
-    },
-    "e-commerce": {
-        "product":    8,
-        "pricing":    8,
-        "faq":        5,
-        "guide":      4,
-        "about":      3,
-        "contact":    3,
-    },
-    "portfolio": {
-        "about":     10,
-        "product":   10,
-        "blog_post":  5,
-        "guide":      4,
-        "contact":    3,
-    },
-    "other": {},
+# Base score per page_type — universal across all site types
+_PAGE_TYPE_SCORES: dict[str, int] = {
+    "guide":     8,
+    "product":   7,
+    "pricing":   6,
+    "about":     5,
+    "faq":       5,
+    "blog_post": 4,
+    "contact":   2,
 }
 
-_DEFAULT_PAGE_SCORE = 1   # any page_type not in the profile
+_DEFAULT_PAGE_SCORE = 1  # any page_type not in the table (e.g. "other")
 
 
 # ---------------------------------------------------------------------------
@@ -90,15 +46,15 @@ class ScoredPage:
 # Scoring helpers
 # ---------------------------------------------------------------------------
 
-def _base_score(page_type: str, profile: str) -> int:
-    return _PROFILE_SCORES.get(profile, {}).get(page_type, _DEFAULT_PAGE_SCORE)
+def _base_score(page_type: str) -> int:
+    return _PAGE_TYPE_SCORES.get(page_type, _DEFAULT_PAGE_SCORE)
 
 
-def _content_score(page: CrawledPage, profile: str) -> int:
+def _content_score(page: CrawledPage) -> int:
     word_count = len(page.content.split())
     score = 0
 
-    # Word count signals (universal)
+    # Word count signals
     if word_count > 500:
         score += 2
     elif word_count > 200:
@@ -110,8 +66,8 @@ def _content_score(page: CrawledPage, profile: str) -> int:
     if page.description and len(page.description) > 50:
         score += 2
 
-    # Code blocks boost for documentation
-    if profile == "documentation" and "```" in page.content:
+    # Code blocks indicate technical content
+    if "```" in page.content:
         score += 2
 
     # High link density = index/nav page, less useful
@@ -129,25 +85,16 @@ def _content_score(page: CrawledPage, profile: str) -> int:
 def score_page(
     page: CrawledPage,
     page_clf: PageClassification,
-    site_clf: SiteClassification,
     base_url: str,
-) -> ScoredPage | None:
-    """Returns None for hard-dropped pages."""
+) -> ScoredPage:
     page_type = page_clf.page_type
-    profile = site_clf.primary_type
 
     # Hero (homepage) always top score
     if page.url.rstrip("/") == base_url.rstrip("/"):
         return ScoredPage(page=page, page_type=page_type, score=15, included=True)
 
-    # Hard drop
-    if page_type in _HARD_DROP_TYPES:
-        return None
-
     depth_penalty = page.depth
-    base = _base_score(page_type, profile)
-    content = _content_score(page, profile)
-    score = base + content - depth_penalty
+    score = _base_score(page_type) + _content_score(page) - depth_penalty
 
     return ScoredPage(page=page, page_type=page_type, score=score)
 
@@ -158,20 +105,16 @@ def score_page(
 
 def score_all(
     pages: list[CrawledPage],
-    classification: ClassificationResult,
+    classification: dict[str, PageClassification],
     base_url: str,
 ) -> list[ScoredPage]:
-    site_clf = classification.site
-
     def _run(threshold: int) -> list[ScoredPage]:
         results = []
         for page in pages:
-            page_clf = classification.pages.get(page.url)
+            page_clf = classification.get(page.url)
             if page_clf is None:
                 continue
-            sp = score_page(page, page_clf, site_clf, base_url)
-            if sp is None:
-                continue
+            sp = score_page(page, page_clf, base_url)
             if sp.score < threshold and sp.score != 15:  # never drop homepage
                 continue
             results.append(sp)
@@ -183,7 +126,7 @@ def score_all(
     if len(scored) < 5:
         scored = _run(RELAXED_DROP_THRESHOLD)
 
-    # Mark included, sort by score, cap at MAX_PAGES
+    # Mark included, sort by score
     for sp in scored:
         sp.included = sp.score >= DROP_THRESHOLD
 

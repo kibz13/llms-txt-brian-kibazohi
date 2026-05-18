@@ -1,9 +1,11 @@
 import logging
 import os
 import time
+from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from uuid import UUID
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from pydantic import field_validator
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +21,7 @@ from generator import generate
 from models import (
     CrawledPagePublic,
     CrawlResponse,
+    Domain,
     Job,
     JobPage,
     JobQueued,
@@ -31,10 +34,27 @@ from scorer import score_all
 
 logger = logging.getLogger(__name__)
 
-APP_ENV     = os.getenv("APP_ENV", "development")
-CRAWL_DEPTH = int(os.getenv("CRAWL4AI_DEPTH", "2"))
+APP_ENV              = os.getenv("APP_ENV", "development")
+CRAWL_DEPTH          = int(os.getenv("CRAWL4AI_DEPTH", "2"))
+MONITOR_INTERVAL_HRS = int(os.getenv("MONITOR_INTERVAL_HOURS", "24"))
 
-app = FastAPI()
+
+# ---------------------------------------------------------------------------
+# Lifespan — APScheduler
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from monitor import run_monitoring
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(run_monitoring, "interval", hours=MONITOR_INTERVAL_HRS)
+    scheduler.start()
+    logger.info("MONITOR  scheduler started  interval=%dh", MONITOR_INTERVAL_HRS)
+    yield
+    scheduler.shutdown(wait=False)
+
+
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -79,7 +99,6 @@ async def _upsert_page(session: AsyncSession, page, page_clf) -> UUID:
     if existing:
         existing.title               = page.title
         existing.description         = page.description
-        existing.content_hash        = page.content_hash
         existing.domain              = domain
         existing.page_type           = page_clf.page_type if page_clf else None
         existing.page_type_confidence = page_clf.confidence if page_clf else None
@@ -93,7 +112,6 @@ async def _upsert_page(session: AsyncSession, page, page_clf) -> UUID:
         domain=domain,
         title=page.title,
         description=page.description,
-        content_hash=page.content_hash,
         page_type=page_clf.page_type if page_clf else None,
         page_type_confidence=page_clf.confidence if page_clf else None,
     )
@@ -101,6 +119,21 @@ async def _upsert_page(session: AsyncSession, page, page_clf) -> UUID:
     await session.commit()
     await session.refresh(db_page)
     return db_page.id
+
+
+async def _upsert_domain(session: AsyncSession, base_url: str, job_id: UUID) -> None:
+    """Register or update a Domain row for monitoring."""
+    domain_str = urlparse(base_url).netloc
+    result = await session.execute(select(Domain).where(Domain.base_url == base_url))
+    existing = result.scalars().first()
+
+    if existing:
+        existing.last_job_id = job_id
+        existing.updated_at  = _now()
+    else:
+        session.add(Domain(base_url=base_url, domain=domain_str, last_job_id=job_id))
+
+    await session.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -118,37 +151,28 @@ async def _process_job(job_id: UUID, url: str, depth: int) -> None:
 
             start        = time.time()
             crawl_result = await crawl(url, depth)
-            raw_pages    = crawl_result.pages
-
-            # Deduplicate by content hash (same logic as generator.py)
-            seen: set[str] = set()
-            unique = []
-            for p in raw_pages:
-                if p.content_hash not in seen:
-                    seen.add(p.content_hash)
-                    unique.append(p)
+            pages        = crawl_result.pages
 
             # Classify once — used for DB persistence and passed implicitly to generate()
-            classification = classify(unique)
-            site_type      = classification.site.primary_type
+            classification = classify(pages)
 
             job.status     = "generating"
             job.updated_at = _now()
             await session.commit()
 
             # Generate llms.txt (runs classify/score internally — accepted MVP redundancy)
-            llms_txt      = await generate(raw_pages)
-            elapsed_ms    = int((time.time() - start) * 1000)
+            llms_txt   = await generate(pages)
+            elapsed_ms = int((time.time() - start) * 1000)
 
             # Upsert pages → collect {url: page_id}
             page_id_map: dict[str, UUID] = {}
-            for page in unique:
-                page_clf = classification.pages.get(page.url)
+            for page in pages:
+                page_clf = classification.get(page.url)
                 pid = await _upsert_page(session, page, page_clf)
                 page_id_map[page.url] = pid
 
             # Score to get rank order for job_pages
-            scored = score_all(unique, classification, url)
+            scored = score_all(pages, classification, url)
             for rank, sp in enumerate(scored, 1):
                 pid = page_id_map.get(sp.page.url)
                 if pid:
@@ -156,11 +180,13 @@ async def _process_job(job_id: UUID, url: str, depth: int) -> None:
 
             job.status             = "done"
             job.result             = llms_txt
-            job.page_count         = len(unique)
-            job.site_type          = site_type
+            job.page_count         = len(pages)
             job.generation_time_ms = elapsed_ms
             job.updated_at         = _now()
             await session.commit()
+
+            # Register domain for monitoring
+            await _upsert_domain(session, url, job_id)
 
         except Exception as exc:
             logger.exception("JOB %s failed", job_id)
