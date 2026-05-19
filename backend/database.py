@@ -9,7 +9,9 @@ from sqlmodel import SQLModel
 
 load_dotenv(Path(__file__).parent / ".env")
 
-DATABASE_URL = os.getenv("DATABASE_URL", "")
+# Railway provides postgresql:// — asyncpg requires postgresql+asyncpg://
+_raw_url = os.getenv("DATABASE_URL", "")
+DATABASE_URL = _raw_url.replace("postgresql://", "postgresql+asyncpg://", 1) if _raw_url.startswith("postgresql://") else _raw_url
 
 _engine = None
 _session_factory = None

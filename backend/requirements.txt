@@ -6,3 +6,5 @@ sqlmodel
 asyncpg
 alembic
 anthropic
+apscheduler>=3.11
+httpx
