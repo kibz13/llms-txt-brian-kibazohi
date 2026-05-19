@@ -10,7 +10,9 @@ from xml.etree import ElementTree as ET
 import httpx
 from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
 
+from classifier import classify_url
 from models import CrawledPage, CrawlResult
+from scorer import DEFAULT_PAGE_SCORE, PAGE_TYPE_SCORES
 
 logger = logging.getLogger(__name__)
 
@@ -52,13 +54,13 @@ QUERY_PARAM_BLACKLIST = frozenset({
     "action", "replytocom", "share", "print",
 })
 
+
 _CRAWL_CONFIG = CrawlerRunConfig(
-    # Wait for any common content container before extracting text.
-    # Without this, Crawl4AI captures the DOM before JS frameworks render
-    # the main content — returning nav chrome instead of page content.
-    wait_for="css:main, article, .content, #content, #main-content",
+    # Fixed delay instead of waiting for a specific selector — the selector
+    # approach caused 30s timeouts on sites that use different DOM structure.
+    # 1s is enough for most JS frameworks to render their initial content.
     page_timeout=30000,
-    delay_before_return_html=0.5,
+    delay_before_return_html=1.0,
 )
 
 _HTTP_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; llmstxt-bot/1.0)"}
@@ -172,8 +174,7 @@ async def _parse_sitemap(
         url = loc_el.text.strip() if loc_el.text else ""
         if not url:
             continue
-        parsed = urlparse(url)
-        clean = parsed._replace(fragment="").geturl()
+        clean = normalise_url(url)
         if not same_domain(base_url, clean):
             continue
         if should_skip(clean):
@@ -218,6 +219,47 @@ async def _get_sitemap_urls(
 # ---------------------------------------------------------------------------
 # Shared crawl helpers
 # ---------------------------------------------------------------------------
+
+def score_url(url: str) -> int:
+    """
+    Estimate page importance from URL path alone — used to prioritise the
+    crawl queue before content is available.
+    Derives score from classify_url() + PAGE_TYPE_SCORES (same source of truth
+    as post-crawl scoring). Shallower unrecognised paths score higher than deeper ones.
+    """
+    page_type = classify_url(url).page_type
+    if page_type in PAGE_TYPE_SCORES:
+        return PAGE_TYPE_SCORES[page_type]
+    # "other" / "hero": fall back to depth-based heuristic
+    depth = len([s for s in urlparse(url).path.split("/") if s])
+    return max(DEFAULT_PAGE_SCORE, 3 - depth)
+
+
+def normalise_url(url: str) -> str:
+    """
+    Canonicalise a URL to prevent duplicate crawling:
+    - Lowercase scheme and host
+    - Remove default ports (80 for http, 443 for https)
+    - Strip trailing slash from non-root paths  (/about/ → /about)
+    - Remove fragment
+    """
+    p = urlparse(url)
+    scheme = p.scheme.lower()
+    host   = p.netloc.lower()
+
+    # Strip default port
+    if ":" in host:
+        hostname, port = host.rsplit(":", 1)
+        if (scheme == "http" and port == "80") or (scheme == "https" and port == "443"):
+            host = hostname
+
+    # Strip trailing slash except on root
+    path = p.path if p.path != "/" else "/"
+    if path != "/" and path.endswith("/"):
+        path = path.rstrip("/")
+
+    return p._replace(scheme=scheme, netloc=host, path=path, fragment="").geturl()
+
 
 def same_domain(base: str, url: str) -> bool:
     return urlparse(url).netloc == urlparse(base).netloc
@@ -272,11 +314,9 @@ def extract_links(result, base_url: str) -> list[str]:
         href = link.get("href", "")
         if not href:
             continue
-        absolute = urljoin(base_url, href)
-        parsed   = urlparse(absolute)
-        clean    = parsed._replace(fragment="").geturl()
-        if same_domain(base_url, clean) and not should_skip(clean):
-            links.append(clean)
+        absolute = normalise_url(urljoin(base_url, href))
+        if same_domain(base_url, absolute) and not should_skip(absolute):
+            links.append(absolute)
     return links
 
 
@@ -329,6 +369,7 @@ def _process_results(
 # ---------------------------------------------------------------------------
 
 async def crawl(url: str, depth: int) -> CrawlResult:
+    url       = normalise_url(url)
     visited: set[str] = set()
     pages:   list[CrawledPage] = []
     semaphore = asyncio.Semaphore(MAX_CONCURRENT)
@@ -352,18 +393,17 @@ async def crawl(url: str, depth: int) -> CrawlResult:
 
         if sitemap_urls:
             # --- Sitemap mode: crawl flat list from sitemap ---
-            # Always ensure homepage is included
-            homepage = url.rstrip("/")
-            all_urls = [url] + [
-                u for u in sitemap_urls if u.rstrip("/") != homepage
-            ]
-            # Deduplicate preserving order, cap to PAGE_CAP
+            # Deduplicate, then sort by URL priority so the PAGE_CAP budget
+            # is spent on the highest-value pages when the sitemap is large.
             seen_set: set[str] = set()
-            queue: list[str] = []
-            for u in all_urls:
-                if u not in seen_set:
+            unique_rest: list[str] = []
+            for u in sitemap_urls:
+                if u != url and u not in seen_set:
                     seen_set.add(u)
-                    queue.append(u)
+                    unique_rest.append(u)
+            unique_rest.sort(key=score_url, reverse=True)
+            # Homepage always first, then highest-scored pages up to PAGE_CAP
+            queue = [url] + unique_rest
             queue = queue[:PAGE_CAP]
 
             logger.info("SITEMAP  crawling %d URLs in batches", len(queue))
@@ -397,6 +437,10 @@ async def crawl(url: str, depth: int) -> CrawlResult:
                 if not current_level or len(pages) >= PAGE_CAP:
                     break
 
+                # Sort within each level so the crawl budget favours
+                # high-value paths when PAGE_CAP is reached mid-level.
+                current_level.sort(key=score_url, reverse=True)
+
                 remaining = PAGE_CAP - len(pages)
                 to_crawl  = []
                 for u in current_level:
@@ -419,7 +463,10 @@ async def crawl(url: str, depth: int) -> CrawlResult:
                     to_crawl, results, current_depth, pages, url, visited,
                 )
                 # Only follow links if there are more depth levels to go
-                current_level = next_level if current_depth < depth - 1 else []
+                current_level = (
+                    sorted(next_level, key=score_url, reverse=True)
+                    if current_depth < depth - 1 else []
+                )
 
     logger.info("CRAWL  done  total=%d pages", len(pages))
     return CrawlResult(
