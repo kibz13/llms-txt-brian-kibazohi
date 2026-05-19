@@ -258,7 +258,7 @@ def score_page(
     if page.url.rstrip("/") == base_url.rstrip("/"):
         return ScoredPage(page=page, page_type=page_type, score=15, signals=signals, included=True)
 
-    depth_penalty = page.depth
+    depth_penalty = min(page.depth * 0.5, 3)
     score = _base_score(page_type) + _signals_to_score(signals, page) - depth_penalty
 
     return ScoredPage(page=page, page_type=page_type, score=score, signals=signals)
