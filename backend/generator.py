@@ -52,6 +52,8 @@ STRUCTURE:
   a human. No marketing language.
 - Group pages into logical H2 sections with clear, descriptive names
 - Each page entry: - [Clean Title](url): One sentence description
+- URLs in page entries must use the .md form: append .md to the original URL
+  (e.g. /about → /about.md, / → /index.html.md, /docs/ → /docs/index.html.md)
 - ## Optional must always be the last section if used
 
 SECTIONS:
@@ -128,6 +130,31 @@ def sanitise_description(text: str | None) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Markdown URL conversion (llms.txt spec)
+# ---------------------------------------------------------------------------
+
+def to_md_url(url: str) -> str:
+    """
+    Return the .md equivalent of a page URL per the llms.txt spec:
+      /          →  /index.html.md
+      /about     →  /about.md
+      /docs/api  →  /docs/api.md
+    URLs ending in / (directory-style) get index.html.md; all others get .md.
+    Our URL normaliser strips trailing slashes, so only the root path hits the
+    first branch in practice.
+    """
+    parsed = urlparse(url)
+    path   = parsed.path
+    if not path or path == "/":
+        new_path = "/index.html.md"
+    elif path.endswith("/"):
+        new_path = path + "index.html.md"
+    else:
+        new_path = path + ".md"
+    return parsed._replace(path=new_path).geturl()
+
+
+# ---------------------------------------------------------------------------
 # Pre-Claude preparation
 # ---------------------------------------------------------------------------
 
@@ -144,7 +171,7 @@ def prepare_for_claude(scored_pages: list[ScoredPage], base_url: str) -> list[di
         if sp.page.url.rstrip("/") == base_url.rstrip("/"):
             continue  # homepage handled separately
         result.append({
-            "url":          sp.page.url,
+            "url":          to_md_url(sp.page.url),
             "title":        sp.page.title or sp.page.url,
             "description":  sanitise_description(sp.page.description),
             "score":        sp.score,
@@ -276,7 +303,7 @@ def _assemble_heuristic(
             title  = _clean_title(sp.page.title, base_domain) or sp.page.url
             desc   = sanitise_description(sp.page.description) or ""
             suffix = f": {desc}" if desc else ""
-            lines.append(f"- [{title}]({sp.page.url}){suffix}")
+            lines.append(f"- [{title}]({to_md_url(sp.page.url)}){suffix}")
         lines.append("")
 
     if optional:
@@ -286,7 +313,7 @@ def _assemble_heuristic(
             title  = _clean_title(sp.page.title, base_domain) or sp.page.url
             desc   = sanitise_description(sp.page.description) or ""
             suffix = f": {desc}" if desc else ""
-            lines.append(f"- [{title}]({sp.page.url}){suffix}")
+            lines.append(f"- [{title}]({to_md_url(sp.page.url)}){suffix}")
         lines.append("")
 
     return "\n".join(lines)

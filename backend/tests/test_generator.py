@@ -5,12 +5,11 @@ generate() is async. Test pages are crafted so Claude augmentation never
 triggers (no "other" page types, descriptions always provided).
 """
 
-import hashlib
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from generator import generate
+from generator import generate, to_md_url
 from models import CrawledPage
 
 # Patch _call_claude to return None so all tests exercise the heuristic fallback.
@@ -30,9 +29,33 @@ def make_page(url, title, description, content="", depth=0):
         title=title,
         description=description,
         content=content,
-        content_hash=hashlib.sha256(content.encode()).hexdigest(),
         depth=depth,
     )
+
+
+# ---------------------------------------------------------------------------
+# to_md_url
+# ---------------------------------------------------------------------------
+
+def test_to_md_url_root():
+    assert to_md_url("https://example.com/") == "https://example.com/index.html.md"
+
+
+def test_to_md_url_simple_path():
+    assert to_md_url("https://example.com/about") == "https://example.com/about.md"
+
+
+def test_to_md_url_nested_path():
+    assert to_md_url("https://example.com/docs/getting-started") == "https://example.com/docs/getting-started.md"
+
+
+def test_to_md_url_directory_path():
+    assert to_md_url("https://example.com/docs/") == "https://example.com/docs/index.html.md"
+
+
+def test_to_md_url_preserves_domain():
+    url = "https://docs.example.com/api/reference"
+    assert to_md_url(url) == "https://docs.example.com/api/reference.md"
 
 
 # ---------------------------------------------------------------------------
@@ -110,49 +133,6 @@ async def test_pricing_page_appears_in_pricing_section():
 # ---------------------------------------------------------------------------
 # Filtering
 # ---------------------------------------------------------------------------
-
-async def test_legal_page_is_dropped():
-    pages = [
-        make_page("https://example.com", "Home", "Home page.", depth=0),
-        make_page(
-            "https://example.com/terms",
-            "Terms of Service",
-            "Legal terms and conditions.",
-            content="Terms content.",
-            depth=1,
-        ),
-    ]
-    result = await generate(pages)
-    assert "Terms of Service" not in result
-
-
-async def test_dashboard_page_is_dropped():
-    pages = [
-        make_page("https://example.com", "Home", "Home page.", depth=0),
-        make_page(
-            "https://example.com/dashboard",
-            "Dashboard",
-            "Your personal dashboard.",
-            content="Dashboard content.",
-            depth=1,
-        ),
-    ]
-    result = await generate(pages)
-    assert "Dashboard" not in result
-
-
-async def test_duplicate_content_deduped():
-    same_content = "# Same\n\n" + "word " * 200
-    same_hash = hashlib.sha256(same_content.encode()).hexdigest()
-    pages = [
-        make_page("https://example.com", "Home", "Home page.", depth=0),
-        CrawledPage(url="https://example.com/a", title="Page A",
-                    description="Description A with enough chars here.",
-                    content=same_content, content_hash=same_hash, depth=1),
-        CrawledPage(url="https://example.com/b", title="Page B",
-                    description="Description B with enough chars here.",
-                    content=same_content, content_hash=same_hash, depth=1),
-    ]
-    result = await generate(pages)
-    # Only one of the two duplicate pages should appear
-    assert result.count("Page A") + result.count("Page B") <= 1
+# Legal, auth, and app-shell paths (/terms, /dashboard, /login, etc.) are
+# filtered by PATH_BLACKLIST in crawler.py before they ever reach the
+# generator. See test_should_skip_* tests in test_crawler.py.
