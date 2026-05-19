@@ -30,6 +30,8 @@ class Job(SQLModel, table=True):
     site_type: Optional[str] = None        # blog | documentation | saas | e-commerce | portfolio | news | other
     page_count: Optional[int] = None
     generation_time_ms: Optional[int] = None
+    tokens_in: Optional[int] = None
+    tokens_out: Optional[int] = None
 
     created_at: datetime = Field(default_factory=_now, sa_column=_ts_col())
     updated_at: datetime = Field(default_factory=_now, sa_column=_ts_col())
@@ -117,6 +119,7 @@ class JobListItem(SQLModel):
     job_id: UUID
     url: str
     page_count: Optional[int]
+    total_tokens: Optional[int]
     created_at: datetime
 
 

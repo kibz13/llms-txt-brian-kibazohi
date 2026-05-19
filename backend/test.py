@@ -1,0 +1,1 @@
+curl -X POST http://localhost:8000/generate \ -H "Content-Type: application/json" \  -d '{"url": " https://garage-sale-red.vercel.app/", "depth": 2}'

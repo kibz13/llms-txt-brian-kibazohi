@@ -1,7 +1,7 @@
 import Link from "next/link"
-import { listJobs } from "@/lib/api"
+import { listJobs, type JobListItem } from "@/lib/api"
 
-export const revalidate = 60 // revalidate every 60 seconds
+export const revalidate = 60
 
 function formatDomain(url: string): string {
   try {
@@ -19,8 +19,14 @@ function formatDate(iso: string): string {
   })
 }
 
+function formatTokens(total: number | null): string {
+  if (!total) return "—"
+  if (total >= 1000) return `${(total / 1000).toFixed(1)}k`
+  return String(total)
+}
+
 export default async function DirectoryPage() {
-  let jobs = []
+  let jobs: JobListItem[] = []
   try {
     jobs = await listJobs()
   } catch {
@@ -61,29 +67,22 @@ export default async function DirectoryPage() {
                   <tr className="border-b bg-muted/40">
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Site</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden sm:table-cell">Pages</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden sm:table-cell">Tokens</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground hidden sm:table-cell">Generated</th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">llms.txt</th>
                   </tr>
                 </thead>
                 <tbody>
                   {jobs.map((job, i) => (
-                    <tr
-                      key={job.job_id}
-                      className={i < jobs.length - 1 ? "border-b" : ""}
-                    >
-                      <td className="px-4 py-3">
-                        <span className="font-medium">{formatDomain(job.url)}</span>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
-                        {job.page_count ?? "—"}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
-                        {formatDate(job.created_at)}
-                      </td>
+                    <tr key={job.job_id} className={i < jobs.length - 1 ? "border-b" : ""}>
+                      <td className="px-4 py-3 font-medium">{formatDomain(job.url)}</td>
+                      <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{job.page_count ?? "—"}</td>
+                      <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{formatTokens(job.total_tokens)}</td>
+                      <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{formatDate(job.created_at)}</td>
                       <td className="px-4 py-3 text-right">
                         <Link
                           href={`/result/${job.job_id}`}
-                          className="text-foreground underline underline-offset-4 hover:opacity-70 transition-opacity"
+                          className="underline underline-offset-4 hover:opacity-70 transition-opacity"
                         >
                           view
                         </Link>

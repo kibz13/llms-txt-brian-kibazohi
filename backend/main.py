@@ -178,7 +178,7 @@ async def _process_job(job_id: UUID, url: str, depth: int) -> None:
             await session.commit()
 
             # Generate llms.txt (runs classify/score internally — accepted MVP redundancy)
-            llms_txt   = await generate(pages)
+            llms_txt, tokens_in, tokens_out = await generate(pages)
             elapsed_ms = int((time.time() - start) * 1000)
 
             # Upsert pages → collect {url: page_id}
@@ -199,6 +199,8 @@ async def _process_job(job_id: UUID, url: str, depth: int) -> None:
             job.result             = llms_txt
             job.page_count         = len(pages)
             job.generation_time_ms = elapsed_ms
+            job.tokens_in          = tokens_in or None
+            job.tokens_out         = tokens_out or None
             job.updated_at         = _now()
             await session.commit()
 
@@ -231,14 +233,25 @@ async def health(session: AsyncSession = Depends(get_session)):
 
 @app.get("/jobs", response_model=list[JobListItem])
 async def list_jobs(session: AsyncSession = Depends(get_session)):
+    # Join domains → jobs to return only the latest job per domain (no duplicates)
     result = await session.execute(
         select(Job)
+        .join(Domain, Domain.last_job_id == Job.id)
         .where(Job.status == "done")
         .order_by(Job.created_at.desc())
         .limit(100)
     )
     jobs = result.scalars().all()
-    return [JobListItem(job_id=j.id, url=j.url, page_count=j.page_count, created_at=j.created_at) for j in jobs]
+    return [
+        JobListItem(
+            job_id=j.id,
+            url=j.url,
+            page_count=j.page_count,
+            total_tokens=(j.tokens_in or 0) + (j.tokens_out or 0) or None,
+            created_at=j.created_at,
+        )
+        for j in jobs
+    ]
 
 
 @app.post("/jobs", response_model=JobQueued)

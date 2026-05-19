@@ -63,20 +63,21 @@ def test_to_md_url_preserves_domain():
 # ---------------------------------------------------------------------------
 
 async def test_generate_empty_returns_empty():
-    assert await generate([]) == ""
+    text, tokens_in, tokens_out = await generate([])
+    assert text == "" and tokens_in == 0 and tokens_out == 0
 
 
 async def test_generate_has_h1():
     pages = [make_page("https://example.com", "Example Site", "We do X for Y.")]
-    result = await generate(pages)
-    assert result.startswith("# Example Site")
+    text, _, _ = await generate(pages)
+    assert text.startswith("# Example Site")
 
 
 async def test_generate_has_blockquote():
     desc = "We help teams build better software faster with AI-powered tools."
     pages = [make_page("https://example.com", "Example Site", desc)]
-    result = await generate(pages)
-    assert f"> {desc}" in result
+    text, _, _ = await generate(pages)
+    assert f"> {desc}" in text
 
 
 # ---------------------------------------------------------------------------
@@ -94,9 +95,9 @@ async def test_guide_page_appears_in_docs_section():
             depth=1,
         ),
     ]
-    result = await generate(pages)
-    assert "## Docs" in result
-    assert "Getting Started" in result
+    text, _, _ = await generate(pages)
+    assert "## Docs" in text
+    assert "Getting Started" in text
 
 
 async def test_blog_post_appears_in_blog_section():
@@ -110,9 +111,9 @@ async def test_blog_post_appears_in_blog_section():
             depth=1,
         ),
     ]
-    result = await generate(pages)
-    assert "## Blog" in result
-    assert "My Post" in result
+    text, _, _ = await generate(pages)
+    assert "## Blog" in text
+    assert "My Post" in text
 
 
 async def test_pricing_page_appears_in_pricing_section():
@@ -126,8 +127,8 @@ async def test_pricing_page_appears_in_pricing_section():
             depth=1,
         ),
     ]
-    result = await generate(pages)
-    assert "## Pricing" in result
+    text, _, _ = await generate(pages)
+    assert "## Pricing" in text
 
 
 # ---------------------------------------------------------------------------

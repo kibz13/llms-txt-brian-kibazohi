@@ -34,6 +34,7 @@ export interface JobListItem {
   job_id: string
   url: string
   page_count: number | null
+  total_tokens: number | null
   created_at: string
 }
 

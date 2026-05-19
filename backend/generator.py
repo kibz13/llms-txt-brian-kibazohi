@@ -187,10 +187,10 @@ def prepare_for_claude(scored_pages: list[ScoredPage], base_url: str) -> list[di
 async def _call_claude(
     pages: list[dict],
     homepage: CrawledPage,
-) -> str | None:
+) -> tuple[str, int, int] | None:
     """
     Ask Claude to generate the full llms.txt from structured page metadata.
-    Returns raw llms.txt string, or None if unavailable/failed.
+    Returns (llms_txt, tokens_in, tokens_out), or None if unavailable/failed.
     """
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
@@ -228,11 +228,13 @@ async def _call_claude(
         if not result.startswith("#"):
             logger.warning("CLAUDE  response did not start with # — discarding")
             return None
+        tokens_in  = message.usage.input_tokens
+        tokens_out = message.usage.output_tokens
         logger.info(
             "CLAUDE  success  chars=%d  tokens_in=%d  tokens_out=%d",
-            len(result), message.usage.input_tokens, message.usage.output_tokens,
+            len(result), tokens_in, tokens_out,
         )
-        return result
+        return result, tokens_in, tokens_out
     except Exception as exc:
         logger.warning("CLAUDE  call failed: %s — using heuristic fallback", exc)
         return None
@@ -323,9 +325,13 @@ def _assemble_heuristic(
 # Main entry point
 # ---------------------------------------------------------------------------
 
-async def generate(pages: list[CrawledPage]) -> str:
+async def generate(pages: list[CrawledPage]) -> tuple[str, int, int]:
+    """
+    Returns (llms_txt, tokens_in, tokens_out).
+    tokens_in/tokens_out are 0 when the heuristic fallback is used.
+    """
     if not pages:
-        return ""
+        return "", 0, 0
 
     # Find homepage
     homepage = next(
@@ -341,10 +347,11 @@ async def generate(pages: list[CrawledPage]) -> str:
     scored         = score_all(pages, classification, base_url)
     prepared       = prepare_for_claude(scored, base_url)
 
-    result = await _call_claude(prepared, homepage)
-    if result:
-        return result
+    claude_result = await _call_claude(prepared, homepage)
+    if claude_result:
+        llms_txt, tokens_in, tokens_out = claude_result
+        return llms_txt, tokens_in, tokens_out
 
-    # Heuristic fallback
+    # Heuristic fallback — no tokens used
     logger.info("ASSEMBLE  heuristic fallback")
-    return _assemble_heuristic(homepage, base_url, base_domain, scored)
+    return _assemble_heuristic(homepage, base_url, base_domain, scored), 0, 0
