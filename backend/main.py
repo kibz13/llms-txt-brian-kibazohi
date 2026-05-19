@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 from uuid import UUID
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from pydantic import field_validator
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -62,6 +62,18 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    ms = int((time.time() - start) * 1000)
+    logger.info(
+        "HTTP  %s %s  status=%d  duration=%dms",
+        request.method, request.url.path, response.status_code, ms,
+    )
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +157,7 @@ async def _process_job(job_id: UUID, url: str, depth: int) -> None:
     async with session_factory() as session:
         job = await session.get(Job, job_id)
         try:
+            logger.info("JOB %s  url=%s  depth=%d  status=crawling", job_id, url, depth)
             job.status     = "crawling"
             job.updated_at = _now()
             await session.commit()
@@ -152,10 +165,12 @@ async def _process_job(job_id: UUID, url: str, depth: int) -> None:
             start        = time.time()
             crawl_result = await crawl(url, depth)
             pages        = crawl_result.pages
+            logger.info("JOB %s  crawled=%d pages  elapsed=%dms", job_id, len(pages), int((time.time() - start) * 1000))
 
             # Classify once — used for DB persistence and passed implicitly to generate()
             classification = classify(pages)
 
+            logger.info("JOB %s  status=generating", job_id)
             job.status     = "generating"
             job.updated_at = _now()
             await session.commit()
@@ -185,11 +200,13 @@ async def _process_job(job_id: UUID, url: str, depth: int) -> None:
             job.updated_at         = _now()
             await session.commit()
 
+            logger.info("JOB %s  status=done  pages=%d  total_ms=%d  output_chars=%d", job_id, len(pages), elapsed_ms, len(llms_txt))
+
             # Register domain for monitoring
             await _upsert_domain(session, url, job_id)
 
         except Exception as exc:
-            logger.exception("JOB %s failed", job_id)
+            logger.exception("JOB %s  status=error  error=%s", job_id, exc)
             job.status     = "error"
             job.error      = str(exc)
             job.updated_at = _now()
@@ -225,6 +242,7 @@ async def create_job(
     await session.commit()
     await session.refresh(job)
 
+    logger.info("JOB %s  created  url=%s  depth=%d", job.id, body.url, body.depth)
     background_tasks.add_task(_process_job, job.id, body.url, body.depth)
 
     return JobQueued(job_id=job.id, status=job.status)
