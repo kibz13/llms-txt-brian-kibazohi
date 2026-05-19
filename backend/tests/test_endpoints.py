@@ -42,7 +42,6 @@ MOCK_CRAWL_RESULT = CrawlResult(
             title="Example",
             description="An example site with great content.",
             content="# Example\n\nAn example site.",
-            content_hash="abc123",
             depth=0,
         )
     ],
@@ -174,7 +173,7 @@ def test_crawl_returns_pages_without_content():
     data = response.json()
     assert "pages" in data
     page = data["pages"][0]
-    assert "content_hash" in page
+    assert "content_hash" not in page
     assert "content" not in page
 
 
