@@ -113,6 +113,13 @@ class CrawlResponse(SQLModel):
 # API response schemas
 # ---------------------------------------------------------------------------
 
+class JobListItem(SQLModel):
+    job_id: UUID
+    url: str
+    page_count: Optional[int]
+    created_at: datetime
+
+
 class JobQueued(SQLModel):
     job_id: UUID
     status: str

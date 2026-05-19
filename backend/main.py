@@ -23,6 +23,7 @@ from models import (
     CrawlResponse,
     Domain,
     Job,
+    JobListItem,
     JobPage,
     JobQueued,
     JobResult,
@@ -226,6 +227,18 @@ async def health(session: AsyncSession = Depends(get_session)):
     except Exception:
         db_status = "error"
     return {"status": "ok", "db": db_status}
+
+
+@app.get("/jobs", response_model=list[JobListItem])
+async def list_jobs(session: AsyncSession = Depends(get_session)):
+    result = await session.execute(
+        select(Job)
+        .where(Job.status == "done")
+        .order_by(Job.created_at.desc())
+        .limit(100)
+    )
+    jobs = result.scalars().all()
+    return [JobListItem(job_id=j.id, url=j.url, page_count=j.page_count, created_at=j.created_at) for j in jobs]
 
 
 @app.post("/jobs", response_model=JobQueued)

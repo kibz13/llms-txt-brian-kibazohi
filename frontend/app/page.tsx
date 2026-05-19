@@ -1,11 +1,15 @@
+import Link from "next/link"
 import { Suspense } from "react"
 import { HomeForm } from "@/components/home-form"
 
 export default function HomePage() {
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="border-b px-6 py-4">
+      <header className="border-b px-6 py-4 flex items-center justify-between">
         <span className="font-semibold tracking-tight">llms.txt</span>
+        <Link href="/directory" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+          Directory
+        </Link>
       </header>
 
       <main className="flex flex-1 items-center justify-center px-4 py-16">

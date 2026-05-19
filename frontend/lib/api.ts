@@ -30,6 +30,27 @@ export async function submitJob(
   return data
 }
 
+export interface JobListItem {
+  job_id: string
+  url: string
+  page_count: number | null
+  created_at: string
+}
+
+export async function listJobs(): Promise<JobListItem[]> {
+  const endpoint = `${API_BASE}/jobs`
+  log("GET", endpoint)
+  const res = await fetch(endpoint)
+  if (!res.ok) {
+    const text = await res.text()
+    log("GET", endpoint, res.status, text)
+    throw new Error(text || `Request failed with status ${res.status}`)
+  }
+  const data = await res.json()
+  log("GET", endpoint, res.status, { count: data.length })
+  return data
+}
+
 export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
   const endpoint = `${API_BASE}/jobs/${jobId}`
   log("GET", endpoint)

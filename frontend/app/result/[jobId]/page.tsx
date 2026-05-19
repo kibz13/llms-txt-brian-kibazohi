@@ -24,9 +24,12 @@ export default function ResultPage({ params }: ResultPageProps) {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="border-b px-6 py-4">
+      <header className="border-b px-6 py-4 flex items-center justify-between">
         <Link href="/" className="font-semibold tracking-tight hover:opacity-70 transition-opacity">
           llms.txt
+        </Link>
+        <Link href="/directory" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+          Directory
         </Link>
       </header>
 
