@@ -58,6 +58,7 @@ class JobPage(SQLModel, table=True):
     job_id: UUID = Field(foreign_key="jobs.id", primary_key=True)
     page_id: UUID = Field(foreign_key="pages.id", primary_key=True)
     rank: Optional[int] = None             # position in final llms.txt (1 = most important)
+    score: Optional[int] = None            # post-crawl score used to prioritise watchlist
 
 
 class Domain(SQLModel, table=True):

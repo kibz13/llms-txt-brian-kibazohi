@@ -176,7 +176,7 @@ async def _process_job(job_id: UUID, url: str, depth: int) -> None:
             for rank, sp in enumerate(scored, 1):
                 pid = page_id_map.get(sp.page.url)
                 if pid:
-                    session.add(JobPage(job_id=job_id, page_id=pid, rank=rank))
+                    session.add(JobPage(job_id=job_id, page_id=pid, rank=rank, score=sp.score))
 
             job.status             = "done"
             job.result             = llms_txt

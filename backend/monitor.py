@@ -19,10 +19,11 @@ from sqlmodel import select
 from crawler import _fetch_text, _parse_robots
 from database import get_engine
 from models import Domain, Job, JobPage, Page, _now
+from scorer import OPTIONAL_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
-WATCHLIST_SIZE = 5   # top-N ranked pages to HEAD-check per domain
+WATCHLIST_SIZE = 5   # max pages to HEAD-check per domain (must score >= OPTIONAL_THRESHOLD)
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +120,7 @@ async def check_domain(domain: Domain, session) -> bool:
             select(Page)
             .join(JobPage, JobPage.page_id == Page.id)
             .where(JobPage.job_id == domain.last_job_id)
+            .where(JobPage.score >= OPTIONAL_THRESHOLD)
             .order_by(JobPage.rank)
             .limit(WATCHLIST_SIZE)
         )
