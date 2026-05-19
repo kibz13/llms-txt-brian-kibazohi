@@ -16,8 +16,9 @@ DROP_THRESHOLD         = 0
 OPTIONAL_THRESHOLD     = 5
 RELAXED_DROP_THRESHOLD = -3
 
-# Base score per page_type — universal across all site types
-_PAGE_TYPE_SCORES: dict[str, int] = {
+# Base score per page_type — universal across all site types.
+# Public so the crawler can derive pre-crawl URL priority from the same table.
+PAGE_TYPE_SCORES: dict[str, int] = {
     "guide":     8,
     "product":   7,
     "pricing":   6,
@@ -27,7 +28,7 @@ _PAGE_TYPE_SCORES: dict[str, int] = {
     "contact":   2,
 }
 
-_DEFAULT_PAGE_SCORE = 1  # any page_type not in the table (e.g. "other")
+DEFAULT_PAGE_SCORE = 1  # any page_type not in the table (e.g. "other")
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +48,7 @@ class ScoredPage:
 # ---------------------------------------------------------------------------
 
 def _base_score(page_type: str) -> int:
-    return _PAGE_TYPE_SCORES.get(page_type, _DEFAULT_PAGE_SCORE)
+    return PAGE_TYPE_SCORES.get(page_type, DEFAULT_PAGE_SCORE)
 
 
 def _content_score(page: CrawledPage) -> int:
