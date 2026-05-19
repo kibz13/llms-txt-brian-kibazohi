@@ -325,6 +325,20 @@ async def _fetch(crawler, url: str, semaphore: asyncio.Semaphore):
         return await crawler.arun(url=url, config=_CRAWL_CONFIG)
 
 
+_ANTIBOT_SIGNALS = (
+    "err_connection_refused",
+    "antibot",
+    "err_tunnel_connection_failed",
+    "403",
+    "blocked",
+)
+
+
+def _is_antibot_error(msg: str) -> bool:
+    lower = msg.lower()
+    return any(s in lower for s in _ANTIBOT_SIGNALS)
+
+
 def _process_results(
     to_crawl: list[str],
     results: list,
@@ -332,9 +346,11 @@ def _process_results(
     pages: list[CrawledPage],
     base_url: str,
     visited: set[str],
+    errors: list[str],
 ) -> list[str]:
     """
     Process a batch of crawl results. Appends to pages in place.
+    Appends error strings to errors in place.
     Returns next-level URLs (for BFS mode only; ignored in sitemap mode).
     """
     next_level_seen: set[str] = set()
@@ -342,10 +358,14 @@ def _process_results(
 
     for u, result in zip(to_crawl, results):
         if isinstance(result, Exception):
-            logger.warning("CRAWL  error %s — %s", u, result)
+            msg = str(result)
+            logger.warning("CRAWL  error %s — %s", u, msg)
+            errors.append(msg)
             continue
         if not result.success:
-            logger.warning("CRAWL  failed %s", u)
+            msg = getattr(result, "error_message", "") or ""
+            logger.warning("CRAWL  failed %s — %s", u, msg)
+            errors.append(msg)
             continue
 
         pages.append(CrawledPage(
@@ -372,6 +392,7 @@ async def crawl(url: str, depth: int) -> CrawlResult:
     url       = normalise_url(url)
     visited: set[str] = set()
     pages:   list[CrawledPage] = []
+    errors:  list[str] = []
     semaphore = asyncio.Semaphore(MAX_CONCURRENT)
 
     # Step 1: robots.txt — get disallow rules and sitemap hint
@@ -427,7 +448,7 @@ async def crawl(url: str, depth: int) -> CrawlResult:
                 )
                 # depth=1 for all sitemap pages (homepage gets depth=0 via position)
                 page_depth = 0 if i == 0 else 1
-                _process_results(batch, results, page_depth, pages, url, visited)
+                _process_results(batch, results, page_depth, pages, url, visited, errors)
 
         else:
             # --- BFS mode: fallback when no sitemap found ---
@@ -460,7 +481,7 @@ async def crawl(url: str, depth: int) -> CrawlResult:
                     return_exceptions=True,
                 )
                 next_level = _process_results(
-                    to_crawl, results, current_depth, pages, url, visited,
+                    to_crawl, results, current_depth, pages, url, visited, errors,
                 )
                 # Only follow links if there are more depth levels to go
                 current_level = (
@@ -469,6 +490,18 @@ async def crawl(url: str, depth: int) -> CrawlResult:
                 )
 
     logger.info("CRAWL  done  total=%d pages", len(pages))
+
+    if not pages:
+        if any(_is_antibot_error(e) for e in errors):
+            raise RuntimeError(
+                "This site is blocking automated requests (antibot protection). "
+                "We were unable to crawl any pages."
+            )
+        raise RuntimeError(
+            "No pages could be crawled from this site. "
+            "It may be unreachable or blocking automated requests."
+        )
+
     return CrawlResult(
         pages=pages,
         crawled_at=datetime.now(timezone.utc).isoformat(),
