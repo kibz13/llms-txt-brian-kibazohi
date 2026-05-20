@@ -24,7 +24,7 @@ from scorer import DROP_THRESHOLD, OPTIONAL_THRESHOLD, ScoredPage, score_all
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 
-CLAUDE_MODEL = "claude-sonnet-4-6"
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
 
 # Heuristic section mapping by page_type (used for section_hint and fallback assembly)
 _PAGE_TYPE_SECTION = {
@@ -212,12 +212,14 @@ def prepare_for_claude(scored_pages: list[ScoredPage], base_url: str) -> list[di
     Sorted by score descending so Claude sees the most important pages first.
     Template deduplication keeps at most 8 pages per structural URL group.
     """
+    dropped_by_score: list[tuple[float, str]] = []
     result = []
     for sp in sorted(scored_pages, key=lambda x: x.score, reverse=True):
-        if sp.score < DROP_THRESHOLD:
-            continue
         if sp.page.url.rstrip("/") == base_url.rstrip("/"):
             continue  # homepage handled separately
+        if sp.score < DROP_THRESHOLD:
+            dropped_by_score.append((sp.score, sp.page.url))
+            continue
         result.append({
             "url":          to_md_url(sp.page.url),
             "title":        sp.page.title or sp.page.url,
@@ -225,7 +227,33 @@ def prepare_for_claude(scored_pages: list[ScoredPage], base_url: str) -> list[di
             "score":        sp.score,
             "section_hint": _PAGE_TYPE_SECTION.get(sp.page_type),
         })
-    return _dedup_templates(result)
+    deduped = _dedup_templates(result)
+    deduped_urls = {p["url"] for p in deduped}
+    dropped_by_dedup = [p for p in result if p["url"] not in deduped_urls]
+
+    logger.info(
+        "PREPARE  %d scored  →  %d after drop  →  %d sent to Claude  (DROP_THRESHOLD=%s)",
+        len(scored_pages) - 1,  # exclude homepage
+        len(result),
+        len(deduped),
+        DROP_THRESHOLD,
+    )
+
+    logger.info("SENT (%d):", len(deduped))
+    for p in deduped:
+        logger.info("  [SEND]  score=%-4s  hint=%-16s  %s", p["score"], p["section_hint"] or "(none)", p["url"])
+
+    if dropped_by_dedup:
+        logger.info("DEDUPED OUT (%d):", len(dropped_by_dedup))
+        for p in dropped_by_dedup:
+            logger.info("  [DEDUP] score=%-4s  hint=%-16s  %s", p["score"], p["section_hint"] or "(none)", p["url"])
+
+    if dropped_by_score:
+        logger.info("DROPPED BY SCORE (%d):", len(dropped_by_score))
+        for score, url in dropped_by_score:
+            logger.info("  [DROP]  score=%-4s  %s", score, url)
+
+    return deduped
 
 
 # ---------------------------------------------------------------------------
