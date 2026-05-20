@@ -1,8 +1,11 @@
 import asyncio
 import json
 import logging
+import re
 import sys
+import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
 from xml.etree import ElementTree as ET
@@ -23,16 +26,18 @@ from prefilter import (
 
 logger = logging.getLogger(__name__)
 
-PAGE_CAP       = 100
-MAX_CONCURRENT = 10   # max parallel requests to a single domain
+PAGE_CAP              = 100
+MAX_CONCURRENT        = 10    # max parallel requests to a single domain
+SLOW_SITE_THRESHOLD_S = 10.0  # avg seconds/page → trigger slow-site cap
+SLOW_SITE_PAGE_CAP    = 20    # reduced cap for slow sites
 
 
 _CRAWL_CONFIG = CrawlerRunConfig(
-    # Fixed delay instead of waiting for a specific selector — the selector
-    # approach caused 30s timeouts on sites that use different DOM structure.
-    # 1s is enough for most JS frameworks to render their initial content.
-    page_timeout=30000,
-    delay_before_return_html=1.0,
+    # Wait for common content selectors, with a hard 15s ceiling.
+    # Falls back to whatever content is available at timeout.
+    wait_for="css:main, css:article, css:.content",
+    page_timeout=15000,
+    delay_before_return_html=0.5,
 )
 
 _HTTP_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; llmstxt-bot/1.0)"}
@@ -223,9 +228,72 @@ def extract_links(result, base_url: str) -> list[str]:
     return links
 
 
+@dataclass
+class _HttpxResult:
+    """Minimal crawl result produced by the httpx fallback path."""
+    success: bool
+    error_message: str = ""
+    markdown: str = ""
+    metadata: dict = field(default_factory=dict)
+    links: dict = field(default_factory=lambda: {"internal": []})
+
+
+def _html_to_result(html: str) -> _HttpxResult:
+    """Parse raw HTML into an _HttpxResult compatible with extract_* helpers."""
+    title_m = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
+    title = title_m.group(1).strip() if title_m else ""
+
+    desc_m = re.search(
+        r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']*)["\']'
+        r'|<meta[^>]+content=["\']([^"\']*)["\'][^>]+name=["\']description["\']',
+        html, re.I,
+    )
+    description = (desc_m.group(1) or desc_m.group(2) or "").strip() if desc_m else ""
+
+    # Strip scripts/styles then all tags to get plain text
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.I | re.S)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    content = f"# {title}\n\n{text[:8000]}" if title else text[:8000]
+
+    hrefs = [{"href": m.group(1)} for m in re.finditer(r'<a[^>]+href=["\']([^"\'#][^"\']*)["\']', html, re.I)]
+
+    return _HttpxResult(
+        success=True,
+        markdown=content,
+        metadata={"title": title, "description": description},
+        links={"internal": hrefs},
+    )
+
+
+async def _httpx_fetch(url: str) -> _HttpxResult:
+    """Fetch a page with plain httpx — no JS rendering, but fast."""
+    try:
+        async with httpx.AsyncClient(
+            timeout=8.0,
+            follow_redirects=True,
+            headers=_HTTP_HEADERS,
+        ) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                return _html_to_result(resp.text)
+            return _HttpxResult(success=False, error_message=f"HTTP {resp.status_code}")
+    except Exception as exc:
+        return _HttpxResult(success=False, error_message=str(exc))
+
+
+_TIMEOUT_SIGNALS = ("timeout", "timed out", "time out")
+
+
 async def _fetch(crawler, url: str, semaphore: asyncio.Semaphore):
     async with semaphore:
-        return await crawler.arun(url=url, config=_CRAWL_CONFIG)
+        result = await crawler.arun(url=url, config=_CRAWL_CONFIG)
+        if not result.success:
+            err = (getattr(result, "error_message", "") or "").lower()
+            if any(s in err for s in _TIMEOUT_SIGNALS):
+                logger.info("FALLBACK  httpx  url=%s", url)
+                return await _httpx_fetch(url)
+        return result
 
 
 _ANTIBOT_SIGNALS = (
@@ -359,10 +427,23 @@ async def crawl(
                     "SITEMAP  batch %d/%d  fetching=%d",
                     i // batch_size + 1, -(-len(queue) // batch_size), len(batch),
                 )
+                t0 = time.time()
                 results = await asyncio.gather(
                     *[_fetch(crawler, u, semaphore) for u in batch],
                     return_exceptions=True,
                 )
+                elapsed = time.time() - t0
+
+                # After first batch: detect slow site and trim remaining queue
+                if i == 0 and batch:
+                    avg_s = elapsed / len(batch)
+                    if avg_s > SLOW_SITE_THRESHOLD_S:
+                        logger.warning(
+                            "SLOW_SITE  avg=%.1fs/page → capping at %d pages",
+                            avg_s, SLOW_SITE_PAGE_CAP,
+                        )
+                        queue = queue[:SLOW_SITE_PAGE_CAP]
+
                 # depth=1 for all sitemap pages (homepage gets depth=0 via position)
                 page_depth = 0 if i == 0 else 1
                 _process_results(batch, results, page_depth, pages, url, visited, errors)
@@ -373,16 +454,17 @@ async def crawl(
             # --- BFS mode: fallback when no sitemap found ---
             current_level = [url]
             preferred_lang: str | None = None  # detected once after homepage crawl
+            effective_cap = PAGE_CAP
 
             for current_depth in range(depth):
-                if not current_level or len(pages) >= PAGE_CAP:
+                if not current_level or len(pages) >= effective_cap:
                     break
 
                 # Sort within each level so the crawl budget favours
                 # high-value paths when PAGE_CAP is reached mid-level.
                 current_level.sort(key=score_url, reverse=True)
 
-                remaining = PAGE_CAP - len(pages)
+                remaining = effective_cap - len(pages)
                 to_crawl  = []
                 for u in current_level:
                     if u not in visited and len(to_crawl) < remaining:
@@ -396,10 +478,22 @@ async def crawl(
                     "CRAWL  depth=%d  pages=%d  fetching=%d in parallel",
                     current_depth, len(pages), len(to_crawl),
                 )
+                t0 = time.time()
                 results = await asyncio.gather(
                     *[_fetch(crawler, u, semaphore) for u in to_crawl],
                     return_exceptions=True,
                 )
+                elapsed = time.time() - t0
+
+                # After depth-0: detect slow site and tighten cap for remaining levels
+                if current_depth == 0 and to_crawl:
+                    avg_s = elapsed / len(to_crawl)
+                    if avg_s > SLOW_SITE_THRESHOLD_S:
+                        logger.warning(
+                            "SLOW_SITE  avg=%.1fs/page → capping at %d pages",
+                            avg_s, SLOW_SITE_PAGE_CAP,
+                        )
+                        effective_cap = SLOW_SITE_PAGE_CAP
                 next_level = _process_results(
                     to_crawl, results, current_depth, pages, url, visited, errors,
                 )

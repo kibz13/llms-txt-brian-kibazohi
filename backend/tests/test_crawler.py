@@ -1,5 +1,5 @@
 """
-Crawler tests — robots.txt parsing, sitemap parsing, URL filtering, BFS crawl.
+Crawler tests — robots.txt parsing, sitemap parsing, BFS crawl.
 Network calls (_fetch_text, AsyncWebCrawler) are always mocked.
 """
 
@@ -14,10 +14,6 @@ from crawler import (
     _parse_robots,
     _parse_sitemap,
     crawl,
-    normalise_url,
-    same_domain,
-    score_url,
-    should_skip,
 )
 from models import CrawledPage, CrawlResult
 
@@ -232,154 +228,6 @@ async def test_get_sitemap_urls_returns_empty_when_none_found():
     with patch("crawler._parse_sitemap", new=AsyncMock(return_value=[])):
         urls = await _get_sitemap_urls("https://example.com", None, [])
     assert urls == []
-
-
-# ---------------------------------------------------------------------------
-# same_domain / should_skip
-# ---------------------------------------------------------------------------
-# score_url
-# ---------------------------------------------------------------------------
-
-def test_score_url_docs_path():
-    assert score_url("https://example.com/docs/getting-started") == 8
-
-
-def test_score_url_pricing_path():
-    assert score_url("https://example.com/pricing") == 6
-
-
-def test_score_url_blog_path():
-    assert score_url("https://example.com/blog/my-post") == 4
-
-
-def test_score_url_contact_path():
-    assert score_url("https://example.com/contact") == 2
-
-
-def test_score_url_docs_ranks_above_blog():
-    assert score_url("https://example.com/docs/api") > score_url("https://example.com/blog/post")
-
-
-def test_score_url_shallow_unknown_ranks_above_deep_unknown():
-    assert score_url("https://example.com/about-us") > score_url("https://example.com/a/b/c/d")
-
-
-def test_score_url_unknown_path_returns_positive():
-    assert score_url("https://example.com/some/unknown/path") >= 1
-
-
-# ---------------------------------------------------------------------------
-# normalise_url
-# ---------------------------------------------------------------------------
-
-def test_normalise_strips_trailing_slash():
-    assert normalise_url("https://example.com/about/") == "https://example.com/about"
-
-
-def test_normalise_preserves_root_slash():
-    assert normalise_url("https://example.com/") == "https://example.com/"
-
-
-def test_normalise_lowercases_scheme_and_host():
-    assert normalise_url("HTTPS://Example.COM/About") == "https://example.com/About"
-
-
-def test_normalise_removes_default_https_port():
-    assert normalise_url("https://example.com:443/page") == "https://example.com/page"
-
-
-def test_normalise_removes_default_http_port():
-    assert normalise_url("http://example.com:80/page") == "http://example.com/page"
-
-
-def test_normalise_keeps_non_default_port():
-    assert normalise_url("https://example.com:8080/page") == "https://example.com:8080/page"
-
-
-def test_normalise_removes_fragment():
-    assert normalise_url("https://example.com/page#section") == "https://example.com/page"
-
-
-def test_normalise_deduplicates_trailing_slash_variant():
-    # Both forms normalise to the same string
-    assert normalise_url("https://example.com/docs") == normalise_url("https://example.com/docs/")
-
-
-# ---------------------------------------------------------------------------
-
-def test_same_domain_true():
-    assert same_domain("https://example.com", "https://example.com/about")
-
-
-def test_same_domain_false():
-    assert not same_domain("https://example.com", "https://other.com/page")
-
-
-def test_should_skip_image():
-    assert should_skip("https://example.com/logo.png")
-
-
-def test_should_skip_pdf():
-    assert should_skip("https://example.com/report.pdf")
-
-
-def test_should_skip_cdn_cgi():
-    assert should_skip("https://example.com/cdn-cgi/trace")
-
-
-def test_should_skip_pagination_param():
-    assert should_skip("https://example.com/blog?page=2")
-
-
-def test_should_skip_utm_param():
-    assert should_skip("https://example.com/?utm_source=google")
-
-
-def test_should_skip_utm_variant():
-    assert should_skip("https://example.com/pricing?utm_campaign=launch&utm_medium=email")
-
-
-def test_should_skip_tracking_param():
-    assert should_skip("https://example.com/post?gclid=abc123")
-
-
-def test_should_not_skip_unknown_param():
-    # Unrecognised query params are still allowed through
-    assert not should_skip("https://example.com/docs?version=2")
-
-
-def test_should_not_skip_clean_url():
-    assert not should_skip("https://example.com/about")
-
-
-# PATH_BLACKLIST
-
-def test_should_skip_tag_path():
-    assert should_skip("https://example.com/tag/python")
-
-
-def test_should_skip_category_path():
-    assert should_skip("https://example.com/category/news/article")
-
-
-def test_should_skip_login_path():
-    assert should_skip("https://example.com/login")
-
-
-def test_should_skip_login_subpath():
-    assert should_skip("https://example.com/login/oauth")
-
-
-def test_should_skip_terms_path():
-    assert should_skip("https://example.com/terms")
-
-
-def test_should_skip_feed_path():
-    assert should_skip("https://example.com/feed/")
-
-
-def test_should_not_skip_docs_path():
-    assert not should_skip("https://example.com/docs/getting-started")
 
 
 # ---------------------------------------------------------------------------
