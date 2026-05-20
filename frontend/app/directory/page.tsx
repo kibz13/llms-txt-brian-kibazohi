@@ -36,7 +36,7 @@ export default async function DirectoryPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <header className="border-b px-6 py-4 flex items-center justify-between">
-        <Link href="/" className="font-semibold tracking-tight hover:opacity-70 transition-opacity">
+        <Link href="/" className="font-semibold tracking-tight hover:opacity-70 transition-opacity font-[family-name:var(--font-libre-baskerville)]">
           llms.txt
         </Link>
         <Link href="/" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
@@ -47,7 +47,7 @@ export default async function DirectoryPage() {
       <main className="flex-1 px-4 py-12">
         <div className="mx-auto w-full max-w-3xl space-y-6">
           <div className="space-y-1">
-            <h1 className="text-2xl font-bold tracking-tight">Directory</h1>
+            <h1 className="text-2xl font-bold tracking-tight font-[family-name:var(--font-libre-baskerville)]">Directory</h1>
             <p className="text-sm text-muted-foreground">
               {jobs.length} llms.txt {jobs.length === 1 ? "file" : "files"} generated
             </p>

@@ -2,12 +2,9 @@
 
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import { UrlInput } from "@/components/url-input"
-import { CrawlSizeSelector } from "@/components/crawl-size-selector"
+import { ArrowRight } from "lucide-react"
 import { submitJob } from "@/lib/api"
-import { CRAWL_PRESETS, type CrawlSize } from "@/lib/types"
+import { CRAWL_PRESETS } from "@/lib/types"
 
 function isValidUrl(value: string): boolean {
   try {
@@ -23,18 +20,22 @@ export function HomeForm() {
   const searchParams = useSearchParams()
 
   const [url, setUrl] = useState("")
-  const [crawlSize, setCrawlSize] = useState<CrawlSize>("recommended")
   const [submitting, setSubmitting] = useState(false)
   const [urlError, setUrlError] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
-  // Pre-fill from query params (e.g. from RetryButton)
   useEffect(() => {
     const paramUrl = searchParams.get("url")
-    const paramCrawlSize = searchParams.get("crawl_size") as CrawlSize | null
     if (paramUrl) setUrl(paramUrl)
-    if (paramCrawlSize && paramCrawlSize in CRAWL_PRESETS) setCrawlSize(paramCrawlSize)
   }, [searchParams])
+
+  const handleBlur = () => {
+    const trimmed = url.trim()
+    if (!trimmed) return
+    if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+      setUrl(`https://${trimmed}`)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -54,7 +55,7 @@ export function HomeForm() {
 
     setSubmitting(true)
     try {
-      const { job_id } = await submitJob(normalized, CRAWL_PRESETS[crawlSize])
+      const { job_id } = await submitJob(normalized, CRAWL_PRESETS["recommended"])
       router.push(`/result/${job_id}`)
     } catch {
       setSubmitError("Could not connect to the server. Please try again.")
@@ -63,36 +64,38 @@ export function HomeForm() {
   }
 
   return (
-    <Card>
-      <CardContent className="pt-6">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <UrlInput
-            value={url}
-            onChange={setUrl}
-            error={urlError}
-            disabled={submitting}
-          />
-
-          <div className="space-y-1.5">
-            <p className="text-xs text-muted-foreground">Crawl size</p>
-            <CrawlSizeSelector
-              value={crawlSize}
-              onChange={setCrawlSize}
-              disabled={submitting}
-            />
-          </div>
-
-          <Button type="submit" className="w-full" disabled={submitting}>
-            {submitting ? "Starting…" : "Generate"}
-          </Button>
-
-          {submitError && (
-            <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-              <p>{submitError}</p>
-            </div>
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <label className="block text-sm font-medium text-slate-700">
+        Website URL
+      </label>
+      <div className="flex gap-3">
+        <input
+          type="url"
+          placeholder="https://example.com"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onBlur={handleBlur}
+          disabled={submitting}
+          aria-invalid={!!urlError}
+          className="flex-1 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+        />
+        <button
+          type="submit"
+          disabled={submitting}
+          className="flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {submitting ? "Starting…" : (
+            <>Generate <ArrowRight className="h-4 w-4" /></>
           )}
-        </form>
-      </CardContent>
-    </Card>
+        </button>
+      </div>
+
+      {urlError && (
+        <p className="text-sm text-red-600">{urlError}</p>
+      )}
+      {submitError && (
+        <p className="text-sm text-red-600">{submitError}</p>
+      )}
+    </form>
   )
 }
