@@ -1,6 +1,7 @@
 # Project docs (kept local)
 REQUIREMENTS.md
 CLAUDE.md
+homepage.png
 
 # Environment variables
 .env

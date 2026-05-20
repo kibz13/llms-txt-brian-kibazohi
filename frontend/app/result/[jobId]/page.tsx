@@ -85,9 +85,8 @@ export default function ResultPage({ params }: ResultPageProps) {
                 <div className="flex gap-3">
                   <RetryButton url={data.url} label="Try again" />
                   <RetryButton
-                    url={data.url}
-                    crawlSize="quick"
-                    label="Use homepage only"
+                    url=""
+                    label="Back to homepage"
                     variant="outline"
                   />
                 </div>

@@ -49,7 +49,7 @@ export function HomeForm() {
         : trimmed
 
     if (!isValidUrl(normalized)) {
-      setUrlError("Please enter a valid URL.")
+      setUrlError("Oops, could not find this URL.")
       return
     }
 
