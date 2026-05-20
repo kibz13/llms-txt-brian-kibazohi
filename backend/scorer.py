@@ -69,9 +69,6 @@ _LINK_RE = re.compile(r'\]\(([^)#\s]+)')
 class PageSignals:
     """
     Decomposed quality signals for a crawled page.
-
-    Keeping dimensions separate allows LLM scoring to override individual
-    signals (e.g. uniqueness) without touching structural ones.
     """
     information_density: float    # 0.0–1.0  word count / content richness
     technical_depth: float        # 0.0–1.0  balanced code+prose; penalises code dumps
@@ -80,7 +77,6 @@ class PageSignals:
     url_boost: int                # raw delta from high/low-value URL path patterns
     template_similarity: float    # 0.0–1.0  within-page structure repetition; higher = template-like
     internal_link_authority: int  # count of other crawled pages that link here
-    uniqueness: float = 0.5       # placeholder — reserved for future LLM scoring
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +89,6 @@ class ScoredPage:
     page_type: str
     score: int
     signals: PageSignals
-    included: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +260,7 @@ def score_page(
 
     # Hero (homepage) always top score
     if page.url.rstrip("/") == base_url.rstrip("/"):
-        return ScoredPage(page=page, page_type=page_type, score=15, signals=signals, included=True)
+        return ScoredPage(page=page, page_type=page_type, score=15, signals=signals)
 
     depth_penalty = min(page.depth * 0.5, 3)
     score = _base_score(page_type) + _signals_to_score(signals, page) - depth_penalty
@@ -302,10 +297,6 @@ def score_all(
     # Relax threshold if too few pages survive
     if len(scored) < 5:
         scored = _run(RELAXED_DROP_THRESHOLD)
-
-    # Mark included, sort by score
-    for sp in scored:
-        sp.included = sp.score >= DROP_THRESHOLD
 
     scored.sort(key=lambda x: x.score, reverse=True)
     return scored
