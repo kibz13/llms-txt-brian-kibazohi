@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { cancelJob } from "@/lib/api"
 
@@ -9,6 +10,7 @@ interface CancelButtonProps {
 }
 
 export function CancelButton({ jobId }: CancelButtonProps) {
+  const router = useRouter()
   const [confirming, setConfirming] = useState(false)
   const [cancelling, setCancelling] = useState(false)
 
@@ -34,6 +36,7 @@ export function CancelButton({ jobId }: CancelButtonProps) {
               setCancelling(true)
               try {
                 await cancelJob(jobId)
+                router.push("/")
               } catch {
                 setCancelling(false)
                 setConfirming(false)
