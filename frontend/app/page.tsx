@@ -1,7 +1,6 @@
 import Link from "next/link"
 import { Suspense } from "react"
 import { HomeForm } from "@/components/home-form"
-import { FolderOpen } from "lucide-react"
 
 export default function HomePage() {
   return (
@@ -9,22 +8,21 @@ export default function HomePage() {
       <div className="mx-auto max-w-3xl">
 
         {/* Header */}
-        <div className="relative flex justify-center mb-10">
-          <div className="text-center">
+        <div className="mb-10">
+          <div className="flex items-baseline justify-between">
             <h1 className="text-4xl font-bold tracking-tight text-slate-900 font-[family-name:var(--font-libre-baskerville)]">
               LLMs.txt Generator
             </h1>
-            <p className="mt-1.5 text-slate-500">
-              Create optimized documentation for AI models
-            </p>
+            <Link
+              href="/directory"
+              className="text-sm text-slate-500 hover:text-slate-900 transition-colors"
+            >
+              Directory →
+            </Link>
           </div>
-          <Link
-            href="/directory"
-            className="absolute right-0 top-0 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 transition-colors"
-          >
-            <FolderOpen className="h-4 w-4" />
-            Directory
-          </Link>
+          <p className="mt-1.5 text-slate-500">
+            Generate AI-readable site maps from any public website
+          </p>
         </div>
 
         {/* Form card */}
@@ -35,31 +33,43 @@ export default function HomePage() {
         </div>
 
         {/* Info section */}
-        <div className="mt-10 space-y-4 text-slate-600">
-          <h2 className="text-xl font-bold text-slate-900">
-            Make Your Website AI-Ready in Minutes
-          </h2>
-          <p>
-            Want AI assistants like ChatGPT and Claude to talk about your website accurately?
-            We&apos;ve got you covered.
-          </p>
-          <p>
-            Our generator creates a special file that helps AI understand your site better.
-            Think of it as giving AI a roadmap to your content.
-          </p>
-          <div className="space-y-2">
-            <p className="font-semibold text-slate-900">What you&apos;ll get:</p>
-            <ul className="list-disc list-inside space-y-1">
-              <li>AI assistants will share accurate info about your site</li>
-              <li>Better visibility when people ask AI about topics you cover</li>
-              <li>Your content presented the way you want it</li>
-              <li>Stay ahead of the curve as more people use AI for search</li>
-            </ul>
+        <div className="mt-10 grid gap-6 md:grid-cols-2 text-slate-600">
+          <div className="space-y-4">
+            <h2 className="text-xl font-bold text-slate-900">
+              Generate an llms.txt from any website
+            </h2>
+
+            <p>
+              Enter a URL and we&apos;ll crawl the site, identify the most important pages,
+              and generate an AI-readable <code className="rounded bg-slate-100 px-1">llms.txt</code> file.
+            </p>
+
+            <div className="space-y-2">
+              <p className="font-semibold text-slate-900">What happens:</p>
+              <ul className="list-disc list-inside space-y-1">
+                <li>Crawls public pages from your website</li>
+                <li>Filters low-value and duplicate pages</li>
+                <li>Ranks important docs, product pages, and resources</li>
+                <li>Generates a structured llms.txt you can publish</li>
+              </ul>
+            </div>
           </div>
-          <p>
-            Join thousands of websites already optimized for the AI era. Just enter your URL
-            and we&apos;ll handle the rest.
-          </p>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-4 font-mono text-xs text-slate-700 shadow-sm">
+            <p className="text-slate-400 mb-3">Preview</p>
+            <pre className="whitespace-pre-wrap">{`# Example Website
+
+> Short description of what the site does.
+
+## Docs
+- Getting Started: /docs
+- API Reference: /api
+- Authentication: /docs/auth
+
+## Product
+- Pricing: /pricing
+- Use Cases: /solutions`}</pre>
+          </div>
         </div>
 
       </div>

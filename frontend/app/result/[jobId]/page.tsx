@@ -8,8 +8,13 @@ import { LlmsPreview } from "@/components/llms-preview"
 import { CopyButton } from "@/components/copy-button"
 import { DownloadButton } from "@/components/download-button"
 import { RetryButton } from "@/components/retry-button"
-import { JobSummary } from "@/components/job-summary"
 import { Card, CardContent } from "@/components/ui/card"
+
+function formatDuration(ms?: number | null): string {
+  if (ms == null) return "—"
+  const s = Math.round(ms / 1000)
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
+}
 
 interface ResultPageProps {
   params: Promise<{ jobId: string }>
@@ -22,6 +27,11 @@ export default function ResultPage({ params }: ResultPageProps) {
   const isInProgress =
     !data || data.status === "queued" || data.status === "crawling" || data.status === "generating"
 
+  let hostname = ""
+  try {
+    if (data?.url) hostname = new URL(data.url).hostname.replace(/^www\./, "")
+  } catch {}
+
   return (
     <div className="flex min-h-screen flex-col">
       <header className="border-b px-6 py-4 flex items-center justify-between">
@@ -33,8 +43,8 @@ export default function ResultPage({ params }: ResultPageProps) {
         </Link>
       </header>
 
-      <main className="flex-1 px-4 py-12">
-        <div className="mx-auto w-full max-w-3xl space-y-6">
+      <main className="flex-1 px-4 py-10">
+        <div className="mx-auto w-full max-w-5xl space-y-6">
 
           {/* Network error */}
           {error && (
@@ -87,21 +97,61 @@ export default function ResultPage({ params }: ResultPageProps) {
 
           {/* Done */}
           {!error && data?.status === "done" && data.result && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between gap-4 flex-wrap">
-                <JobSummary
-                  pageCount={data.page_count ?? 0}
-                  generationTimeMs={data.generation_time_ms}
-                />
-                <div className="flex gap-2 flex-wrap">
-                  <CopyButton text={data.result} />
-                  <DownloadButton content={data.result} />
-                  <RetryButton url={data.url} label="Generate again" variant="outline" />
+            <>
+              {/* Summary card */}
+              <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Generated llms.txt for</p>
+                    <h1 className="text-lg font-semibold tracking-tight">{hostname}</h1>
+                    <p className="text-sm text-muted-foreground truncate">{data.url}</p>
+                  </div>
+                  <span className="rounded-full border px-2 py-1 text-xs text-muted-foreground shrink-0">
+                    Done
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Pages crawled</p>
+                    <p className="font-medium">{data.page_count ?? "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Generation time</p>
+                    <p className="font-medium">{formatDuration(data.generation_time_ms)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Format</p>
+                    <p className="font-medium">llms.txt</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Spec</p>
+                    <p className="font-medium">llmstxt.org</p>
+                  </div>
                 </div>
               </div>
 
-              <LlmsPreview content={data.result} />
-            </div>
+              {/* Preview with sticky toolbar */}
+              <div>
+                <div className="sticky top-0 z-10 flex items-center justify-between border rounded-t-lg bg-background px-4 py-3">
+                  <p className="text-sm font-medium">Preview</p>
+                  <div className="flex gap-2">
+                    <CopyButton text={data.result} />
+                    <DownloadButton content={data.result} />
+                    <RetryButton url={data.url} label="Regenerate" variant="outline" />
+                  </div>
+                </div>
+                <LlmsPreview content={data.result} />
+              </div>
+
+              {/* Next step */}
+              <div className="rounded-lg border p-4 text-sm text-muted-foreground">
+                <p className="font-medium text-foreground mb-1">Next step</p>
+                <p>
+                  Add this file to your website at <code className="text-xs bg-muted px-1 py-0.5 rounded">/llms.txt</code> so AI systems can discover it.
+                </p>
+              </div>
+            </>
           )}
 
         </div>
