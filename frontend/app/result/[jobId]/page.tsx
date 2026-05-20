@@ -94,6 +94,21 @@ export default function ResultPage({ params }: ResultPageProps) {
             </Card>
           )}
 
+          {/* Cancelled state */}
+          {!error && data?.status === "cancelled" && (
+            <Card>
+              <CardContent className="pt-6 space-y-4">
+                <p className="font-medium">Generation was cancelled.</p>
+                <p className="text-sm text-muted-foreground">
+                  This job stopped before llms.txt could be generated.
+                </p>
+                <div className="flex gap-3">
+                  <RetryButton url={data.url} label="Generate again" />
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Done */}
           {!error && data?.status === "done" && data.result && (
             <>
