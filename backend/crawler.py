@@ -13,10 +13,12 @@ from xml.etree import ElementTree as ET
 import httpx
 from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
 
+from errors import AntibotError, UnreachableError
 from models import CrawledPage, CrawlResult
 from prefilter import (
     detect_lang_prefix,
     filter_language_variants,
+    filter_template_explosion,
     is_non_preferred_lang,
     normalise_url,
     same_domain,
@@ -33,9 +35,8 @@ SLOW_SITE_PAGE_CAP    = 20    # reduced cap for slow sites
 
 
 _CRAWL_CONFIG = CrawlerRunConfig(
-    # Wait for common content selectors, with a hard 15s ceiling.
-    # Falls back to whatever content is available at timeout.
-    wait_for="css:main, css:article, css:.content",
+    # Hard ceiling per page. No wait_for selector — adding one causes crawl4ai
+    # to wait an additional page_timeout after load, doubling the wall time.
     page_timeout=15000,
     delay_before_return_html=0.5,
 )
@@ -395,6 +396,17 @@ async def crawl(
             )
         sitemap_urls = filtered
 
+    # Template explosion filter — applied before crawling so we never
+    # fetch hundreds of near-identical parameterised pages (city pages,
+    # product SKUs, etc.).  Groups below explosion_threshold are untouched.
+    before_explosion = len(sitemap_urls)
+    sitemap_urls = filter_template_explosion(sitemap_urls)
+    if len(sitemap_urls) < before_explosion:
+        logger.info(
+            "PREFILTER  template explosion, dropped %d URLs",
+            before_explosion - len(sitemap_urls),
+        )
+
     async with AsyncWebCrawler(verbose=False) as crawler:
 
         if sitemap_urls:
@@ -434,15 +446,15 @@ async def crawl(
                 )
                 elapsed = time.time() - t0
 
-                # After first batch: detect slow site and trim remaining queue
-                if i == 0 and batch:
-                    avg_s = elapsed / len(batch)
-                    if avg_s > SLOW_SITE_THRESHOLD_S:
-                        logger.warning(
-                            "SLOW_SITE  avg=%.1fs/page → capping at %d pages",
-                            avg_s, SLOW_SITE_PAGE_CAP,
-                        )
-                        queue = queue[:SLOW_SITE_PAGE_CAP]
+                # After first batch: detect slow site by wall-clock time.
+                # Parallel fetches mean elapsed ≈ slowest page, not sum —
+                # dividing by batch size would mask slow sites.
+                if i == 0 and len(batch) >= 3 and elapsed > SLOW_SITE_THRESHOLD_S:
+                    logger.warning(
+                        "SLOW_SITE  batch_elapsed=%.1fs → capping at %d pages",
+                        elapsed, SLOW_SITE_PAGE_CAP,
+                    )
+                    queue = queue[:SLOW_SITE_PAGE_CAP]
 
                 # depth=1 for all sitemap pages (homepage gets depth=0 via position)
                 page_depth = 0 if i == 0 else 1
@@ -485,15 +497,14 @@ async def crawl(
                 )
                 elapsed = time.time() - t0
 
-                # After depth-0: detect slow site and tighten cap for remaining levels
-                if current_depth == 0 and to_crawl:
-                    avg_s = elapsed / len(to_crawl)
-                    if avg_s > SLOW_SITE_THRESHOLD_S:
-                        logger.warning(
-                            "SLOW_SITE  avg=%.1fs/page → capping at %d pages",
-                            avg_s, SLOW_SITE_PAGE_CAP,
-                        )
-                        effective_cap = SLOW_SITE_PAGE_CAP
+                # After depth-1 (first real batch of discovered links): detect slow site.
+                # Depth-0 is always just the homepage (1 URL) — not enough signal.
+                if current_depth == 1 and len(to_crawl) >= 3 and elapsed > SLOW_SITE_THRESHOLD_S:
+                    logger.warning(
+                        "SLOW_SITE  batch_elapsed=%.1fs → capping at %d pages",
+                        elapsed, SLOW_SITE_PAGE_CAP,
+                    )
+                    effective_cap = SLOW_SITE_PAGE_CAP
                 next_level = _process_results(
                     to_crawl, results, current_depth, pages, url, visited, errors,
                 )
@@ -526,14 +537,8 @@ async def crawl(
 
     if not pages:
         if any(_is_antibot_error(e) for e in errors):
-            raise RuntimeError(
-                "This site is blocking automated requests (antibot protection). "
-                "We were unable to crawl any pages."
-            )
-        raise RuntimeError(
-            "No pages could be crawled from this site. "
-            "It may be unreachable or blocking automated requests."
-        )
+            raise AntibotError("antibot protection detected for %s" % url)
+        raise UnreachableError("no pages crawled for %s" % url)
 
     return CrawlResult(
         pages=pages,
