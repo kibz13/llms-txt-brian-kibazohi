@@ -7,6 +7,7 @@ from uuid import UUID
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import field_validator
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -17,6 +18,7 @@ from sqlmodel import select
 from classifier import classify
 from crawler import crawl
 from database import get_engine, get_session
+from errors import CrawlError, LlmsTxtError
 from generator import generate
 from models import (
     CrawledPagePublic,
@@ -56,6 +58,21 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+# ---------------------------------------------------------------------------
+# Exception handlers
+# ---------------------------------------------------------------------------
+
+@app.exception_handler(CrawlError)
+async def crawl_error_handler(request: Request, exc: CrawlError) -> JSONResponse:
+    return JSONResponse(status_code=422, content={"detail": exc.user_message})
+
+
+@app.exception_handler(LlmsTxtError)
+async def llmstxt_error_handler(request: Request, exc: LlmsTxtError) -> JSONResponse:
+    return JSONResponse(status_code=500, content={"detail": exc.user_message})
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -209,10 +226,16 @@ async def _process_job(job_id: UUID, url: str, depth: int) -> None:
             # Register domain for monitoring
             await _upsert_domain(session, url, job_id)
 
-        except Exception as exc:
-            logger.exception("JOB %s  status=error  error=%s", job_id, exc)
+        except LlmsTxtError as exc:
+            logger.warning("JOB %s  status=error  type=%s  detail=%s", job_id, type(exc).__name__, exc)
             job.status     = "error"
-            job.error      = str(exc)
+            job.error      = exc.user_message
+            job.updated_at = _now()
+            await session.commit()
+        except Exception as exc:
+            logger.exception("JOB %s  status=error  unexpected  error=%s", job_id, exc)
+            job.status     = "error"
+            job.error      = "An unexpected error occurred."
             job.updated_at = _now()
             await session.commit()
 
@@ -315,10 +338,7 @@ async def crawl_endpoint(body: CrawlRequest):
     if not parsed.scheme or not parsed.netloc:
         raise HTTPException(status_code=400, detail="Invalid URL")
 
-    try:
-        result = await crawl(body.url, body.depth)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    result = await crawl(body.url, body.depth)
 
     return CrawlResponse(
         pages=[CrawledPagePublic(**p.model_dump()) for p in result.pages],
