@@ -182,6 +182,43 @@ def test_crawl_returns_pages_without_content():
 # GET /health
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# POST /jobs/{job_id}/cancel
+# ---------------------------------------------------------------------------
+
+def test_cancel_job_in_progress():
+    job = Job(id=uuid4(), url="https://example.com", status=JobState.CRAWLING)
+    app.dependency_overrides[get_session] = session_override(job=job)
+    try:
+        response = client.post(f"/jobs/{job.id}/cancel")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancel_requested"
+
+
+def test_cancel_job_not_found():
+    app.dependency_overrides[get_session] = session_override(job=None)
+    try:
+        response = client.post(f"/jobs/{uuid4()}/cancel")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+
+
+def test_cancel_job_already_done_returns_409():
+    job = Job(id=uuid4(), url="https://example.com", status=JobState.DONE, result="# Site")
+    app.dependency_overrides[get_session] = session_override(job=job)
+    try:
+        response = client.post(f"/jobs/{job.id}/cancel")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 409
+
+
 def test_get_job_cancelled_returns_status():
     job = Job(
         id=uuid4(),

@@ -35,3 +35,8 @@ class UnreachableError(CrawlError):
 class GenerationError(LlmsTxtError):
     """Raised when llms.txt generation fails after a successful crawl."""
     user_message = "We were unable to generate llms.txt for this site."
+
+
+class JobCancelledError(LlmsTxtError):
+    """Raised at a safe checkpoint when the job has been marked cancel_requested."""
+    user_message = "Generation was cancelled."

@@ -31,6 +31,7 @@ from models import (
     JobStatus,
 )
 from processor import JobProcessor
+from repository import JobRepository
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +201,19 @@ async def get_job(job_id: UUID, session: AsyncSession = Depends(get_session)):
         created_at=job.created_at,
         updated_at=job.updated_at,
     )
+
+
+@app.post("/jobs/{job_id}/cancel")
+async def cancel_job(job_id: UUID, session: AsyncSession = Depends(get_session)):
+    repo = JobRepository(session)
+    job  = await repo.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    cancellable = {JobState.QUEUED, JobState.CRAWLING, JobState.GENERATING}
+    if job.status not in cancellable:
+        raise HTTPException(status_code=409, detail=f"Cannot cancel a job with status '{job.status}'")
+    await repo.set_status(job, JobState.CANCEL_REQUESTED)
+    return {"job_id": str(job_id), "status": JobState.CANCEL_REQUESTED}
 
 
 @app.post("/crawl", response_model=CrawlResponse)

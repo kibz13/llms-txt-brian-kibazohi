@@ -12,9 +12,10 @@ class JobState(str, Enum):
     QUEUED     = "queued"
     CRAWLING   = "crawling"
     GENERATING = "generating"
-    DONE       = "done"
-    ERROR      = "error"
-    CANCELLED  = "cancelled"
+    DONE             = "done"
+    ERROR            = "error"
+    CANCEL_REQUESTED = "cancel_requested"
+    CANCELLED        = "cancelled"
 
 
 def _now() -> datetime:

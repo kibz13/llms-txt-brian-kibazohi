@@ -21,7 +21,7 @@ from uuid import UUID
 from classifier import classify
 from crawler import crawl
 from database import get_engine
-from errors import LlmsTxtError
+from errors import JobCancelledError, LlmsTxtError
 from generator import generate
 from models import Job, JobState
 from repository import JobRepository
@@ -52,6 +52,9 @@ class JobProcessor:
                     job, JobState.CANCELLED,
                     error="Job exceeded the 10-minute time limit and was cancelled.",
                 )
+            except JobCancelledError:
+                logger.info("JOB %s  cancelled  reason=user_request", self.job_id)
+                await repo.set_status(job, JobState.CANCELLED)
             except LlmsTxtError as exc:
                 logger.warning("JOB %s  error  type=%s  detail=%s", self.job_id, type(exc).__name__, exc)
                 await repo.set_status(job, JobState.ERROR, error=exc.user_message)
@@ -70,10 +73,22 @@ class JobProcessor:
         logger.info("JOB %s  crawled=%d pages  elapsed=%dms",
                     self.job_id, len(pages), int((time.time() - start) * 1000))
 
+        # Checkpoint 1 — after crawl
+        if await repo.is_cancel_requested(job):
+            raise JobCancelledError("cancelled after crawl")
+
         classification = classify(pages)
+
+        # Checkpoint 2 — after classification
+        if await repo.is_cancel_requested(job):
+            raise JobCancelledError("cancelled after classification")
 
         logger.info("JOB %s  status=generating", self.job_id)
         await repo.set_status(job, JobState.GENERATING)
+
+        # Checkpoint 3 — before Claude call
+        if await repo.is_cancel_requested(job):
+            raise JobCancelledError("cancelled before generation")
 
         llms_txt, tokens_in, tokens_out = await generate(pages)
         elapsed_ms = int((time.time() - start) * 1000)

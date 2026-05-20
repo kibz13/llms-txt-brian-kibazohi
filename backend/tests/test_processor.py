@@ -45,6 +45,7 @@ def _make_repo(job):
     repo.upsert_page = AsyncMock(return_value=uuid4())
     repo.upsert_domain = AsyncMock()
     repo.stage_job_pages = MagicMock()
+    repo.is_cancel_requested = AsyncMock(return_value=False)
     return repo
 
 
@@ -149,6 +150,32 @@ async def test_processor_unexpected_error_sets_error_with_generic_message():
     final_call = repo.set_status.call_args
     assert final_call.args[1] == JobState.ERROR
     assert final_call.kwargs["error"] == "An unexpected error occurred."
+
+
+@pytest.mark.asyncio
+async def test_processor_cancel_at_checkpoint_sets_cancelled():
+    """Cancellation requested between crawl and generate → CANCELLED, not ERROR."""
+    job = _make_job()
+    repo = _make_repo(job)
+    # First call to is_cancel_requested (after crawl) returns True
+    repo.is_cancel_requested = AsyncMock(return_value=True)
+    processor = JobProcessor(job.id, "https://example.com", depth=2)
+
+    session_cm = AsyncMock()
+    session_cm.__aenter__ = AsyncMock(return_value=MagicMock())
+    session_cm.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("processor.JobRepository", return_value=repo),
+        patch("processor.get_engine") as mock_engine,
+        patch("processor.crawl", new=AsyncMock(return_value=_make_crawl_result())),
+        patch("processor.classify", return_value={}),
+    ):
+        mock_engine.return_value = (MagicMock(), MagicMock(return_value=session_cm))
+        await processor.run()
+
+    final_call = repo.set_status.call_args
+    assert final_call.args[1] == JobState.CANCELLED
 
 
 # ---------------------------------------------------------------------------

@@ -45,6 +45,11 @@ class JobRepository:
             setattr(job, key, value)
         await self.session.commit()
 
+    async def is_cancel_requested(self, job: Job) -> bool:
+        """Refresh job from DB and return True if cancellation has been requested."""
+        await self.session.refresh(job)
+        return job.status == JobState.CANCEL_REQUESTED
+
     # ------------------------------------------------------------------
     # Pages
     # ------------------------------------------------------------------
