@@ -50,8 +50,20 @@ def classify_url(url: str) -> PageClassification:
     if re.search(r"^/docs?$|^/documentation$|^/developers?$|^/reference$", path_lower):
         return PageClassification("guide", 0.8, ["doc_index_url"])
 
+    # Conceptual content that may live outside /docs (e.g. /concepts/, /architecture/)
+    if re.search(r"/concepts?(?:/|$)|/architecture(?:/|$)|/fundamentals?(?:/|$)|/how.?to(?:/|$)|/examples?(?:/|$)", path_lower):
+        return PageClassification("guide", 0.7, ["concept_url"])
+
+    # Versioned docs paths: /v1/, /v2.0/, etc.
+    if re.search(r"/v\d+(?:\.\d+)*(?:/|$)", path_lower):
+        return PageClassification("guide", 0.65, ["versioned_doc_url"])
+
     if re.search(r"/blog/|/posts?/|/articles?/|/news/|/insights?/", path_lower):
         return PageClassification("blog_post", 0.7, ["blog_url"])
+
+    # Date-based URL structure common in WordPress and CMS blogs: /2019/07/post-title
+    if re.search(r"/20\d{2}/\d{1,2}/", path_lower):
+        return PageClassification("blog_post", 0.8, ["date_url"])
 
     if re.search(r"/product/|/products?$|/features?/|/solutions?/|/platform/|/use-cases?/|/integrations?/", path_lower):
         return PageClassification("product", 0.85, ["product_url"])

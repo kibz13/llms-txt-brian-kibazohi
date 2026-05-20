@@ -155,6 +155,53 @@ def to_md_url(url: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Template deduplication
+# ---------------------------------------------------------------------------
+
+def _template_key(url: str) -> str:
+    """
+    Return a structural group key by stripping the content slug (last segment).
+    Groups pages that share the same parent path so we can cap entries per group.
+
+    /blog/my-post.md         → /blog
+    /docs/api/list-all.md    → /docs/api
+    /v1/reference/create.md  → /v1/reference
+    """
+    path = urlparse(url).path.rstrip("/")
+    parts = [p for p in path.split("/") if p]
+    if len(parts) >= 2:
+        return "/" + "/".join(parts[:-1])
+    return path or "/"
+
+
+_NO_DEDUP_SECTIONS = {"## Docs"}  # every docs page is individually valuable
+
+
+def _dedup_templates(pages: list[dict], max_per_group: int = 8) -> list[dict]:
+    """
+    Keep at most max_per_group pages per structural URL group.
+    Input must be sorted by score descending so the highest-value pages
+    in each group are retained when the cap is reached.
+
+    Docs sections are exempt — /guide/philosophy and /guide/performance are
+    genuinely distinct pages, not templates. The cap targets editorial sections
+    (blog, changelog) where many entries really are interchangeable.
+    """
+    counts: dict[str, int] = {}
+    result = []
+    for page in pages:
+        if page.get("section_hint") in _NO_DEDUP_SECTIONS:
+            result.append(page)
+            continue
+        key = _template_key(page["url"])
+        n = counts.get(key, 0)
+        if n < max_per_group:
+            counts[key] = n + 1
+            result.append(page)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Pre-Claude preparation
 # ---------------------------------------------------------------------------
 
@@ -163,6 +210,7 @@ def prepare_for_claude(scored_pages: list[ScoredPage], base_url: str) -> list[di
     Build the structured page list sent to Claude.
     Excludes homepage (rendered in header) and hard-dropped pages.
     Sorted by score descending so Claude sees the most important pages first.
+    Template deduplication keeps at most 8 pages per structural URL group.
     """
     result = []
     for sp in sorted(scored_pages, key=lambda x: x.score, reverse=True):
@@ -177,7 +225,7 @@ def prepare_for_claude(scored_pages: list[ScoredPage], base_url: str) -> list[di
             "score":        sp.score,
             "section_hint": _PAGE_TYPE_SECTION.get(sp.page_type),
         })
-    return result
+    return _dedup_templates(result)
 
 
 # ---------------------------------------------------------------------------

@@ -1,58 +1,30 @@
 import asyncio
 import json
 import logging
-import re
 import sys
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
-from urllib.parse import parse_qs, urljoin, urlparse
+from urllib.parse import urljoin, urlparse
 from xml.etree import ElementTree as ET
 
 import httpx
 from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
 
-from classifier import classify_url
 from models import CrawledPage, CrawlResult
-from scorer import DEFAULT_PAGE_SCORE, PAGE_TYPE_SCORES
+from prefilter import (
+    detect_lang_prefix,
+    filter_language_variants,
+    is_non_preferred_lang,
+    normalise_url,
+    same_domain,
+    score_url,
+    should_skip,
+)
 
 logger = logging.getLogger(__name__)
 
 PAGE_CAP       = 100
 MAX_CONCURRENT = 10   # max parallel requests to a single domain
-
-SKIP_PATTERNS = re.compile(
-    r"(/cdn-cgi/|\.pdf$|\.jpg$|\.jpeg$|\.png$|\.gif$|\.svg$|\.ico$|#)",
-    re.IGNORECASE,
-)
-
-# Paths that are never useful to an LLM — skipped before any crawl request is made.
-PATH_BLACKLIST = (
-    # Metadata & taxonomy hubs
-    "/tag/", "/tags/", "/category/", "/categories/", "/archive/", "/archives/",
-    "/author/", "/authors/", "/topic/", "/topics/", "/labels/",
-    # Structural noise
-    "/page/", "/pages/", "/search", "/query", "/feed/", "/rss",
-    # Auth & account
-    "/login", "/signup", "/register", "/signin", "/logout", "/profile",
-    "/settings", "/cart", "/checkout", "/billing",
-    # Legal & footers
-    "/privacy", "/privacy-policy", "/terms", "/tos", "/cookie-policy",
-    "/legal", "/license", "/dpa",
-    # App shell & admin (login-walled, no useful content for LLMs)
-    "/dashboard", "/app/", "/console", "/admin",
-)
-
-# Query parameters that indicate duplicate content, pagination, tracking, or UI state.
-# Any URL whose query string contains one of these keys is skipped.
-QUERY_PARAM_BLACKLIST = frozenset({
-    # Pagination
-    "page", "p", "offset", "cursor", "limit", "start",
-    # Sorting & filtering
-    "sort", "order", "orderby", "filter", "category", "tag", "view",
-    # Tracking & sessions
-    "gclid", "session", "sid", "ph",
-    # Actions
-    "action", "replytocom", "share", "print",
-})
 
 
 _CRAWL_CONFIG = CrawlerRunConfig(
@@ -217,77 +189,8 @@ async def _get_sitemap_urls(
 
 
 # ---------------------------------------------------------------------------
-# Shared crawl helpers
+# Content extraction helpers
 # ---------------------------------------------------------------------------
-
-def score_url(url: str) -> int:
-    """
-    Estimate page importance from URL path alone — used to prioritise the
-    crawl queue before content is available.
-    Derives score from classify_url() + PAGE_TYPE_SCORES (same source of truth
-    as post-crawl scoring). Shallower unrecognised paths score higher than deeper ones.
-    """
-    page_type = classify_url(url).page_type
-    if page_type in PAGE_TYPE_SCORES:
-        return PAGE_TYPE_SCORES[page_type]
-    # "other" / "hero": fall back to depth-based heuristic
-    depth = len([s for s in urlparse(url).path.split("/") if s])
-    return max(DEFAULT_PAGE_SCORE, 3 - depth)
-
-
-def normalise_url(url: str) -> str:
-    """
-    Canonicalise a URL to prevent duplicate crawling:
-    - Lowercase scheme and host
-    - Remove default ports (80 for http, 443 for https)
-    - Strip trailing slash from non-root paths  (/about/ → /about)
-    - Remove fragment
-    """
-    p = urlparse(url)
-    scheme = p.scheme.lower()
-    host   = p.netloc.lower()
-
-    # Strip default port
-    if ":" in host:
-        hostname, port = host.rsplit(":", 1)
-        if (scheme == "http" and port == "80") or (scheme == "https" and port == "443"):
-            host = hostname
-
-    # Strip trailing slash except on root
-    path = p.path if p.path != "/" else "/"
-    if path != "/" and path.endswith("/"):
-        path = path.rstrip("/")
-
-    return p._replace(scheme=scheme, netloc=host, path=path, fragment="").geturl()
-
-
-def same_domain(base: str, url: str) -> bool:
-    return urlparse(url).netloc == urlparse(base).netloc
-
-
-def _path_blacklisted(path: str) -> bool:
-    for entry in PATH_BLACKLIST:
-        prefix = entry if entry.endswith("/") else entry + "/"
-        exact  = entry.rstrip("/")
-        if path == exact or path.startswith(prefix):
-            return True
-    return False
-
-
-def should_skip(url: str) -> bool:
-    if SKIP_PATTERNS.search(url):
-        return True
-    parsed = urlparse(url)
-    if _path_blacklisted(parsed.path):
-        return True
-    if parsed.query:
-        params = {k.lower() for k in parse_qs(parsed.query)}
-        if params & QUERY_PARAM_BLACKLIST:
-            return True
-        if any(k.startswith("utm_") for k in params):
-            return True
-    return False
-
 
 def extract_title(result) -> str:
     if result.metadata and result.metadata.get("title"):
@@ -388,7 +291,11 @@ def _process_results(
 # Main crawl entry point
 # ---------------------------------------------------------------------------
 
-async def crawl(url: str, depth: int) -> CrawlResult:
+async def crawl(
+    url: str,
+    depth: int,
+    on_batch: Callable[[list[str]], Awaitable[None]] | None = None,
+) -> CrawlResult:
     url       = normalise_url(url)
     visited: set[str] = set()
     pages:   list[CrawledPage] = []
@@ -409,6 +316,16 @@ async def crawl(url: str, depth: int) -> CrawlResult:
 
     # Step 2: sitemap — try to get URL list
     sitemap_urls = await _get_sitemap_urls(url, robots_sitemap, disallowed)
+
+    # Step 3: filter language variants from sitemap before scoring
+    if sitemap_urls:
+        filtered = filter_language_variants(sitemap_urls)
+        if len(filtered) < len(sitemap_urls):
+            logger.info(
+                "PREFILTER  multi-language site, dropped %d non-preferred language URLs",
+                len(sitemap_urls) - len(filtered),
+            )
+        sitemap_urls = filtered
 
     async with AsyncWebCrawler(verbose=False) as crawler:
 
@@ -449,10 +366,13 @@ async def crawl(url: str, depth: int) -> CrawlResult:
                 # depth=1 for all sitemap pages (homepage gets depth=0 via position)
                 page_depth = 0 if i == 0 else 1
                 _process_results(batch, results, page_depth, pages, url, visited, errors)
+                if on_batch:
+                    await on_batch([p.url for p in pages])
 
         else:
             # --- BFS mode: fallback when no sitemap found ---
             current_level = [url]
+            preferred_lang: str | None = None  # detected once after homepage crawl
 
             for current_depth in range(depth):
                 if not current_level or len(pages) >= PAGE_CAP:
@@ -483,6 +403,25 @@ async def crawl(url: str, depth: int) -> CrawlResult:
                 next_level = _process_results(
                     to_crawl, results, current_depth, pages, url, visited, errors,
                 )
+
+                # Detect language prefix from homepage's outgoing links (depth 0 only).
+                # All subsequent levels are filtered to the preferred language.
+                if current_depth == 0:
+                    preferred_lang = detect_lang_prefix(next_level)
+                    if preferred_lang:
+                        logger.info(
+                            "PREFILTER  multi-language site, keeping '%s' only",
+                            preferred_lang,
+                        )
+                if preferred_lang:
+                    next_level = [
+                        u for u in next_level
+                        if not is_non_preferred_lang(u, preferred_lang)
+                    ]
+
+                if on_batch:
+                    await on_batch([p.url for p in pages])
+
                 # Only follow links if there are more depth levels to go
                 current_level = (
                     sorted(next_level, key=score_url, reverse=True)

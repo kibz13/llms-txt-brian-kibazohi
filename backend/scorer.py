@@ -46,12 +46,16 @@ _ONBOARDING_TITLE = re.compile(
 # URL path segments that signal high or low retrieval value for an LLM.
 # Checked against the lowercased path — first match wins.
 _URL_BOOST_PATTERNS: list[tuple[re.Pattern, int]] = [
-    (re.compile(r"/getting.?started|/quickstart"),        5),
-    (re.compile(r"/authentication|/auth(?:/|$)"),         4),
-    (re.compile(r"/overview(?:/|$)|/introduction(?:/|$)|/concepts(?:/|$)"), 3),
-    (re.compile(r"/api.?reference|/reference(?:/|$)"),   -3),
-    (re.compile(r"/changelog|/releases(?:/|$)|/release.notes"), -4),
-    (re.compile(r"/sdk(?:/|$)|/client.?librar"),         -2),
+    (re.compile(r"/getting.?started|/quickstart"),                              5),
+    (re.compile(r"/authentication|/auth(?:/|$)"),                               4),
+    (re.compile(r"/overview(?:/|$)|/introduction(?:/|$)|/concepts(?:/|$)"),     3),
+    (re.compile(r"/api.?reference|/reference(?:/|$)"),                         -3),
+    (re.compile(r"/changelog|/releases(?:/|$)|/release.notes"),                -4),
+    (re.compile(r"/sdk(?:/|$)|/client.?librar"),                               -2),
+    # Old-year paths (pre-2020) are likely stale content
+    (re.compile(r"/20[01]\d/"),                                                 -2),
+    # Versioned docs may be outdated
+    (re.compile(r"/v\d+\.\d+/"),                                               -1),
 ]
 
 _LINK_RE = re.compile(r'\]\(([^)#\s]+)')
@@ -100,7 +104,12 @@ def _base_score(page_type: str) -> int:
     return PAGE_TYPE_SCORES.get(page_type, DEFAULT_PAGE_SCORE)
 
 
-def _compute_url_boost(url: str) -> int:
+def compute_url_boost(url: str) -> int:
+    """
+    Return a score delta for a URL based on path patterns that signal
+    high or low retrieval value. Public so crawler.py can use the same
+    signal for pre-crawl prioritisation.
+    """
     path = urlparse(url).path.lower()
     for pattern, delta in _URL_BOOST_PATTERNS:
         if pattern.search(path):
@@ -196,7 +205,7 @@ def _compute_signals(page: CrawledPage, incoming_links: int = 0) -> PageSignals:
         technical_depth=technical_depth,
         navigational_noise=navigational_noise,
         onboarding_value=onboarding_value,
-        url_boost=_compute_url_boost(page.url),
+        url_boost=compute_url_boost(page.url),
         template_similarity=_compute_template_similarity(page.content),
         internal_link_authority=incoming_links,
     )
