@@ -1,9 +1,20 @@
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Optional
 from uuid import UUID, uuid4
 
 from sqlalchemy import Column, TIMESTAMP
 from sqlmodel import Field, SQLModel
+
+
+class JobState(str, Enum):
+    """Valid states for a Job. Using StrEnum so values compare equal to plain strings."""
+    QUEUED     = "queued"
+    CRAWLING   = "crawling"
+    GENERATING = "generating"
+    DONE       = "done"
+    ERROR      = "error"
+    CANCELLED  = "cancelled"
 
 
 def _now() -> datetime:
@@ -24,7 +35,7 @@ class Job(SQLModel, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     url: str
-    status: str = Field(default="queued")  # queued | crawling | generating | done | error
+    status: str = Field(default=JobState.QUEUED)  # queued | crawling | generating | done | error | cancelled
     result: Optional[str] = None           # llms.txt output
     error: Optional[str] = None
     site_type: Optional[str] = None        # blog | documentation | saas | e-commerce | portfolio | news | other

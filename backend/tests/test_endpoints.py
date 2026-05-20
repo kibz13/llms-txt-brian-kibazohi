@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from database import get_session
 from main import app
-from models import CrawledPage, CrawlResult, Job
+from models import CrawledPage, CrawlResult, Job, JobState
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -58,7 +58,8 @@ client = TestClient(app, raise_server_exceptions=True)
 def test_create_job_returns_queued():
     app.dependency_overrides[get_session] = session_override()
     try:
-        with patch("main._process_job", new=AsyncMock()):
+        with patch("main.JobProcessor") as mock_processor_cls:
+            mock_processor_cls.return_value.run = AsyncMock()
             response = client.post("/jobs", json={"url": "https://example.com"})
     finally:
         app.dependency_overrides.clear()
@@ -94,7 +95,7 @@ def test_get_job_not_found():
 
 
 def test_get_job_crawling_returns_status():
-    job = Job(id=uuid4(), url="https://example.com", status="crawling")
+    job = Job(id=uuid4(), url="https://example.com", status=JobState.CRAWLING)
     app.dependency_overrides[get_session] = session_override(job=job)
     try:
         response = client.get(f"/jobs/{job.id}")
@@ -112,7 +113,7 @@ def test_get_job_done_returns_result():
     job = Job(
         id=uuid4(),
         url="https://example.com",
-        status="done",
+        status=JobState.DONE,
         result="# Example\n\n> A site.",
         page_count=5,
         site_type="saas",
@@ -135,7 +136,7 @@ def test_get_job_error_returns_error():
     job = Job(
         id=uuid4(),
         url="https://example.com",
-        status="error",
+        status=JobState.ERROR,
         error="Crawl timed out",
     )
     app.dependency_overrides[get_session] = session_override(job=job)
@@ -180,6 +181,25 @@ def test_crawl_returns_pages_without_content():
 # ---------------------------------------------------------------------------
 # GET /health
 # ---------------------------------------------------------------------------
+
+def test_get_job_cancelled_returns_status():
+    job = Job(
+        id=uuid4(),
+        url="https://example.com",
+        status=JobState.CANCELLED,
+        error="Job exceeded the 10-minute time limit and was cancelled.",
+    )
+    app.dependency_overrides[get_session] = session_override(job=job)
+    try:
+        response = client.get(f"/jobs/{job.id}")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "cancelled"
+    assert "10-minute" in data["error"]
+
 
 def test_health_db_error_still_returns_200():
     """Health returns 200 even when DB is down — db field signals the error."""

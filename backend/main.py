@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from uuid import UUID
 
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -15,25 +16,21 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
-from classifier import classify
 from crawler import crawl
-from database import get_engine, get_session
+from database import get_session
 from errors import CrawlError, LlmsTxtError
-from generator import generate
 from models import (
     CrawledPagePublic,
     CrawlResponse,
     Domain,
     Job,
     JobListItem,
-    JobPage,
     JobQueued,
     JobResult,
+    JobState,
     JobStatus,
-    Page,
-    _now,
 )
-from scorer import score_all
+from processor import JobProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -116,129 +113,6 @@ class CrawlRequest(BaseModel):
     depth: int = 2
 
 
-# ---------------------------------------------------------------------------
-# DB helpers
-# ---------------------------------------------------------------------------
-
-async def _upsert_page(session: AsyncSession, page, page_clf) -> UUID:
-    """Insert or update a Page row. Returns the page id."""
-    domain = urlparse(page.url).netloc
-
-    result = await session.execute(select(Page).where(Page.url == page.url))
-    existing = result.scalars().first()
-
-    if existing:
-        existing.title               = page.title
-        existing.description         = page.description
-        existing.domain              = domain
-        existing.page_type           = page_clf.page_type if page_clf else None
-        existing.page_type_confidence = page_clf.confidence if page_clf else None
-        existing.updated_at          = _now()
-        await session.commit()
-        await session.refresh(existing)
-        return existing.id
-
-    db_page = Page(
-        url=page.url,
-        domain=domain,
-        title=page.title,
-        description=page.description,
-        page_type=page_clf.page_type if page_clf else None,
-        page_type_confidence=page_clf.confidence if page_clf else None,
-    )
-    session.add(db_page)
-    await session.commit()
-    await session.refresh(db_page)
-    return db_page.id
-
-
-async def _upsert_domain(session: AsyncSession, base_url: str, job_id: UUID) -> None:
-    """Register or update a Domain row for monitoring."""
-    domain_str = urlparse(base_url).netloc
-    result = await session.execute(select(Domain).where(Domain.base_url == base_url))
-    existing = result.scalars().first()
-
-    if existing:
-        existing.last_job_id = job_id
-        existing.updated_at  = _now()
-    else:
-        session.add(Domain(base_url=base_url, domain=domain_str, last_job_id=job_id))
-
-    await session.commit()
-
-
-# ---------------------------------------------------------------------------
-# Background job processor
-# ---------------------------------------------------------------------------
-
-async def _process_job(job_id: UUID, url: str, depth: int) -> None:
-    _, session_factory = get_engine()
-    async with session_factory() as session:
-        job = await session.get(Job, job_id)
-        try:
-            logger.info("JOB %s  url=%s  depth=%d  status=crawling", job_id, url, depth)
-            job.status     = "crawling"
-            job.updated_at = _now()
-            await session.commit()
-
-            start        = time.time()
-            crawl_result = await crawl(url, depth)
-            pages        = crawl_result.pages
-            logger.info("JOB %s  crawled=%d pages  elapsed=%dms", job_id, len(pages), int((time.time() - start) * 1000))
-
-            # Classify once — used for DB persistence and passed implicitly to generate()
-            classification = classify(pages)
-
-            logger.info("JOB %s  status=generating", job_id)
-            job.status     = "generating"
-            job.updated_at = _now()
-            await session.commit()
-
-            # Generate llms.txt (runs classify/score internally — accepted MVP redundancy)
-            llms_txt, tokens_in, tokens_out = await generate(pages)
-            elapsed_ms = int((time.time() - start) * 1000)
-
-            # Upsert pages → collect {url: page_id}
-            page_id_map: dict[str, UUID] = {}
-            for page in pages:
-                page_clf = classification.get(page.url)
-                pid = await _upsert_page(session, page, page_clf)
-                page_id_map[page.url] = pid
-
-            # Score to get rank order for job_pages
-            scored = score_all(pages, classification, url)
-            for rank, sp in enumerate(scored, 1):
-                pid = page_id_map.get(sp.page.url)
-                if pid:
-                    session.add(JobPage(job_id=job_id, page_id=pid, rank=rank, score=sp.score))
-
-            job.status             = "done"
-            job.result             = llms_txt
-            job.page_count         = len(pages)
-            job.generation_time_ms = elapsed_ms
-            job.tokens_in          = tokens_in or None
-            job.tokens_out         = tokens_out or None
-            job.updated_at         = _now()
-            await session.commit()
-
-            logger.info("JOB %s  status=done  pages=%d  total_ms=%d  output_chars=%d", job_id, len(pages), elapsed_ms, len(llms_txt))
-
-            # Register domain for monitoring
-            await _upsert_domain(session, url, job_id)
-
-        except LlmsTxtError as exc:
-            logger.warning("JOB %s  status=error  type=%s  detail=%s", job_id, type(exc).__name__, exc)
-            job.status     = "error"
-            job.error      = exc.user_message
-            job.updated_at = _now()
-            await session.commit()
-        except Exception as exc:
-            logger.exception("JOB %s  status=error  unexpected  error=%s", job_id, exc)
-            job.status     = "error"
-            job.error      = "An unexpected error occurred."
-            job.updated_at = _now()
-            await session.commit()
-
 
 # ---------------------------------------------------------------------------
 # Endpoints
@@ -260,7 +134,7 @@ async def list_jobs(session: AsyncSession = Depends(get_session)):
     result = await session.execute(
         select(Job)
         .join(Domain, Domain.last_job_id == Job.id)
-        .where(Job.status == "done")
+        .where(Job.status == JobState.DONE)
         .order_by(Job.created_at.desc())
         .limit(100)
     )
@@ -293,7 +167,7 @@ async def create_job(
     await session.refresh(job)
 
     logger.info("JOB %s  created  url=%s  depth=%d", job.id, body.url, body.depth)
-    background_tasks.add_task(_process_job, job.id, body.url, body.depth)
+    background_tasks.add_task(JobProcessor(job.id, body.url, body.depth).run)
 
     return JobQueued(job_id=job.id, status=job.status)
 
@@ -304,7 +178,7 @@ async def get_job(job_id: UUID, session: AsyncSession = Depends(get_session)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    if job.status == "done":
+    if job.status == JobState.DONE:
         return JobResult(
             job_id=job.id,
             status=job.status,
