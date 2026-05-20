@@ -12,7 +12,7 @@ from urllib.parse import urljoin, urlparse
 from xml.etree import ElementTree as ET
 
 import httpx
-from crawl4ai import AsyncWebCrawler, CrawlerRunConfig
+from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
 
 from errors import AntibotError, UnreachableError
 from models import CrawledPage, CrawlResult
@@ -48,6 +48,14 @@ _CRAWL_CONFIG = CrawlerRunConfig(
     # to wait an additional page_timeout after load, doubling the wall time.
     page_timeout=15000,
     delay_before_return_html=0.5,
+)
+
+# Required for running Chromium inside a Docker container (e.g. Railway).
+# --no-sandbox: Chromium sandbox is incompatible with most container environments.
+# --disable-dev-shm-usage: /dev/shm is often too small in containers; use /tmp instead.
+_BROWSER_CONFIG = BrowserConfig(
+    headless=True,
+    extra_args=["--no-sandbox", "--disable-dev-shm-usage"],
 )
 
 _HTTP_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; llmstxt-bot/1.0)"}
@@ -417,7 +425,7 @@ async def crawl(
             before_explosion - len(sitemap_urls),
         )
 
-    async with AsyncWebCrawler(verbose=False) as crawler:
+    async with AsyncWebCrawler(config=_BROWSER_CONFIG, verbose=False) as crawler:
 
         if sitemap_urls:
             # --- Sitemap mode: crawl flat list from sitemap ---
