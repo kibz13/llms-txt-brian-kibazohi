@@ -28,10 +28,18 @@ from prefilter import (
 
 logger = logging.getLogger(__name__)
 
-PAGE_CAP              = 100
+PAGE_CAP              = 100   # default; overridden per-crawl by _depth_to_page_cap()
 MAX_CONCURRENT        = 10    # max parallel requests to a single domain
 SLOW_SITE_THRESHOLD_S = 10.0  # avg seconds/page → trigger slow-site cap
 SLOW_SITE_PAGE_CAP    = 20    # reduced cap for slow sites
+
+# Maps crawl depth (set by Coverage selector) to a page budget.
+# Applied in both sitemap mode and BFS mode so coverage is meaningful regardless.
+_DEPTH_PAGE_CAPS: dict[int, int] = {1: 25, 2: 100, 3: 150, 4: 175, 5: 200}
+
+
+def _depth_to_page_cap(depth: int) -> int:
+    return _DEPTH_PAGE_CAPS.get(depth, PAGE_CAP)
 
 
 _CRAWL_CONFIG = CrawlerRunConfig(
@@ -366,6 +374,7 @@ async def crawl(
     on_batch: Callable[[list[str]], Awaitable[None]] | None = None,
 ) -> CrawlResult:
     url       = normalise_url(url)
+    page_cap  = _depth_to_page_cap(depth)
     visited: set[str] = set()
     pages:   list[CrawledPage] = []
     errors:  list[str] = []
@@ -420,9 +429,9 @@ async def crawl(
                     seen_set.add(u)
                     unique_rest.append(u)
             unique_rest.sort(key=score_url, reverse=True)
-            # Homepage always first, then highest-scored pages up to PAGE_CAP
+            # Homepage always first, then highest-scored pages up to page_cap
             queue = [url] + unique_rest
-            queue = queue[:PAGE_CAP]
+            queue = queue[:page_cap]
 
             logger.info("SITEMAP  crawling %d URLs in batches", len(queue))
 
@@ -466,7 +475,7 @@ async def crawl(
             # --- BFS mode: fallback when no sitemap found ---
             current_level = [url]
             preferred_lang: str | None = None  # detected once after homepage crawl
-            effective_cap = PAGE_CAP
+            effective_cap = page_cap
 
             for current_depth in range(depth):
                 if not current_level or len(pages) >= effective_cap:
