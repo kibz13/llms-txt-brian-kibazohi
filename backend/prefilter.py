@@ -171,10 +171,32 @@ def filter_language_variants(urls: list[str]) -> list[str]:
     For multi-language sites, keep only URLs in the preferred language.
     URLs with no language prefix are always kept.
     Returns the original list unchanged for single-language sites.
+
+    Also handles the mixed case: when a site has some language-prefixed URLs
+    (e.g. /it/...) alongside non-prefixed canonical URLs, the language-prefixed
+    variants are dropped even if only one language code is present.
     """
     preferred = detect_lang_prefix(urls)
     if preferred is None:
-        return urls
+        # Check for a mixed site: some URLs have a language prefix, some don't.
+        # If both kinds exist, the non-prefixed URLs are canonical; drop the rest.
+        has_lang = has_non_lang = False
+        for url in urls:
+            parts = [p for p in urlparse(url).path.split("/") if p]
+            if parts and parts[0].lower() in _LANG_CODES:
+                has_lang = True
+            else:
+                has_non_lang = True
+            if has_lang and has_non_lang:
+                break
+        if not (has_lang and has_non_lang):
+            return urls  # mono-language site or no language prefixes — nothing to filter
+        result = []
+        for url in urls:
+            parts = [p for p in urlparse(url).path.split("/") if p]
+            if not parts or parts[0].lower() not in _LANG_CODES:
+                result.append(url)
+        return result
 
     result = []
     for url in urls:
@@ -197,6 +219,75 @@ def is_non_preferred_lang(url: str, preferred: str) -> bool:
     if not parts:
         return False
     return parts[0].lower() in _LANG_CODES and parts[0].lower() != preferred
+
+
+# ---------------------------------------------------------------------------
+# Template explosion detection
+# ---------------------------------------------------------------------------
+
+def _normalise_segment(seg: str) -> str:
+    """Map a dynamic-looking path segment to a type token; leave static ones unchanged."""
+    # Location slug: city-state-zip (e.g. plandome-heights-ny-11030)
+    if re.search(r"-[a-z]{2}-\d{5}$", seg):
+        return ":location"
+    # UUID
+    if re.match(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}", seg, re.I):
+        return ":uuid"
+    # Full date: 2024-01-15
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", seg):
+        return ":date"
+    # Year: 2000–2035 (before general numeric to avoid mis-classifying)
+    if re.match(r"^20[0-3]\d$", seg):
+        return ":year"
+    # Pure numeric ID (4+ digits)
+    if re.match(r"^\d{4,}$", seg):
+        return ":id"
+    # Slug ending in a numeric ID (product-name-1234, sku-56789)
+    if re.search(r"-\d{3,}$", seg):
+        return ":id"
+    return seg
+
+
+def path_shape(url: str) -> str:
+    """
+    Return a structural signature for a URL path by normalising dynamic segments.
+
+    /weather-forecast/now/plandome-heights-ny-11030  →  /weather-forecast/now/:location
+    /products/abc-furniture-12345                    →  /products/:id
+    /docs/authentication                             →  /docs/authentication
+    """
+    segments = [s for s in urlparse(url).path.split("/") if s]
+    return "/" + "/".join(_normalise_segment(s) for s in segments) if segments else "/"
+
+
+def filter_template_explosion(
+    urls: list[str],
+    max_per_shape: int = 10,
+    explosion_threshold: int = 20,
+) -> list[str]:
+    """
+    Cap URL groups that exhibit template explosion.
+
+    A group is considered exploded only when it contains more than
+    explosion_threshold URLs with the same structural shape.  Groups
+    below the threshold pass through untouched — so a docs site with
+    15 pages under /docs/* is unaffected, while a weather site with
+    500 /weather-forecast/now/:location pages is capped at max_per_shape.
+    """
+    from collections import Counter
+    shape_counts = Counter(path_shape(u) for u in urls)
+    seen: dict[str, int] = {}
+    result = []
+    for url in urls:
+        shape = path_shape(url)
+        if shape_counts[shape] <= explosion_threshold:
+            result.append(url)
+        else:
+            n = seen.get(shape, 0)
+            if n < max_per_shape:
+                seen[shape] = n + 1
+                result.append(url)
+    return result
 
 
 # ---------------------------------------------------------------------------
