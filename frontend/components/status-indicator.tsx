@@ -22,11 +22,13 @@ const CONNECTOR_MESSAGES: string[][] = [
 ]
 
 const LOG_LINES: Record<JobStatus, string[]> = {
-  queued:     ["Preparing crawl…"],
-  crawling:   ["Fetching robots.txt", "Sitemap found", "Fetching public pages", "Removing duplicate URLs", "Scoring page importance"],
-  generating: ["Classifying page types", "Filtering low-value pages", "Scoring documentation pages", "Preparing generation payload", "Sending to Claude", "Formatting llms.txt"],
-  done:       ["Done"],
-  error:      ["Error encountered"],
+  queued:            ["Preparing crawl…"],
+  crawling:          ["Fetching robots.txt", "Sitemap found", "Fetching public pages", "Removing duplicate URLs", "Scoring page importance"],
+  generating:        ["Classifying page types", "Filtering low-value pages", "Scoring documentation pages", "Preparing generation payload", "Sending to Claude", "Formatting llms.txt"],
+  done:              ["Done"],
+  error:             ["Error encountered"],
+  cancel_requested:  ["Cancellation requested…"],
+  cancelled:         ["Cancelled"],
 }
 
 function getStepStates(status: JobStatus): StepState[] {
