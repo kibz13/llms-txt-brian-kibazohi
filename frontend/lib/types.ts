@@ -1,10 +1,25 @@
 export const CRAWL_PRESETS = {
-  quick: 1,
-  recommended: 2,
-  deep: 3,
+  quick:         1,
+  standard:      2,
+  comprehensive: 5,
 } as const
 
 export type CrawlSize = keyof typeof CRAWL_PRESETS
+
+export const COVERAGE_OPTIONS: Record<CrawlSize, { label: string; description: string }> = {
+  quick: {
+    label:       "Quick",
+    description: "Homepage + core navigation pages. Fastest generation.",
+  },
+  standard: {
+    label:       "Standard",
+    description: "Balanced crawl across important pages. Recommended for most websites.",
+  },
+  comprehensive: {
+    label:       "Comprehensive",
+    description: "Deep crawl with broader coverage. Best for docs, APIs, and developer platforms.",
+  },
+}
 
 export type JobStatus = "queued" | "crawling" | "generating" | "done" | "error" | "cancel_requested" | "cancelled"
 

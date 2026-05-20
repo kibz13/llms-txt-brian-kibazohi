@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { ArrowRight } from "lucide-react"
 import { submitJob } from "@/lib/api"
-import { CRAWL_PRESETS } from "@/lib/types"
+import { COVERAGE_OPTIONS, CRAWL_PRESETS, type CrawlSize } from "@/lib/types"
 
 function isValidUrl(value: string): boolean {
   try {
@@ -20,6 +20,7 @@ export function HomeForm() {
   const searchParams = useSearchParams()
 
   const [url, setUrl] = useState("")
+  const [coverage, setCoverage] = useState<CrawlSize>("standard")
   const [submitting, setSubmitting] = useState(false)
   const [urlError, setUrlError] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -55,7 +56,7 @@ export function HomeForm() {
 
     setSubmitting(true)
     try {
-      const { job_id } = await submitJob(normalized, CRAWL_PRESETS["recommended"])
+      const { job_id } = await submitJob(normalized, CRAWL_PRESETS[coverage])
       router.push(`/result/${job_id}`)
     } catch {
       setSubmitError("Could not connect to the server. Please try again.")
@@ -88,6 +89,30 @@ export function HomeForm() {
             <>Generate <ArrowRight className="h-4 w-4" /></>
           )}
         </button>
+      </div>
+
+      {/* Coverage selector */}
+      <div className="space-y-2">
+        <p className="text-sm font-medium text-slate-700">Coverage</p>
+        <div className="flex gap-1 p-1 rounded-lg bg-slate-100 w-fit">
+          {(Object.keys(COVERAGE_OPTIONS) as CrawlSize[]).map((size) => (
+            <button
+              key={size}
+              type="button"
+              disabled={submitting}
+              onClick={() => setCoverage(size)}
+              className={[
+                "rounded-md px-4 py-1.5 text-sm font-medium transition-colors disabled:opacity-50",
+                coverage === size
+                  ? "bg-white text-slate-900 shadow-sm"
+                  : "text-slate-500 hover:text-slate-700",
+              ].join(" ")}
+            >
+              {COVERAGE_OPTIONS[size].label}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-slate-500">{COVERAGE_OPTIONS[coverage].description}</p>
       </div>
 
       {urlError && (

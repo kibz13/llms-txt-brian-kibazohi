@@ -15,7 +15,7 @@ interface RetryButtonProps {
 
 export function RetryButton({
   url,
-  crawlSize = "recommended",
+  crawlSize = "standard",
   label = "Try again",
   variant = "default",
 }: RetryButtonProps) {
