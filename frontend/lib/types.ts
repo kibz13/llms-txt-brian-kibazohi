@@ -6,7 +6,7 @@ export const CRAWL_PRESETS = {
 
 export type CrawlSize = keyof typeof CRAWL_PRESETS
 
-export type JobStatus = "queued" | "crawling" | "generating" | "done" | "error"
+export type JobStatus = "queued" | "crawling" | "generating" | "done" | "error" | "cancel_requested" | "cancelled"
 
 export interface JobStatusResponse {
   job_id: string

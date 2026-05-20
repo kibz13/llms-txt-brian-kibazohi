@@ -23,7 +23,7 @@ export function useJobPolling(jobId: string) {
       try {
         const result = await getJobStatus(jobId)
         setData(result)
-        if (result.status === "done" || result.status === "error") {
+        if (result.status === "done" || result.status === "error" || result.status === "cancelled") {
           stop()
         }
       } catch (e) {

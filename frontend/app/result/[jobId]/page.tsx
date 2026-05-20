@@ -8,6 +8,7 @@ import { LlmsPreview } from "@/components/llms-preview"
 import { CopyButton } from "@/components/copy-button"
 import { DownloadButton } from "@/components/download-button"
 import { RetryButton } from "@/components/retry-button"
+import { CancelButton } from "@/components/cancel-button"
 import { Card, CardContent } from "@/components/ui/card"
 
 function formatDuration(ms?: number | null): string {
@@ -25,7 +26,7 @@ export default function ResultPage({ params }: ResultPageProps) {
   const { data, error } = useJobPolling(jobId)
 
   const isInProgress =
-    !data || data.status === "queued" || data.status === "crawling" || data.status === "generating"
+    !data || data.status === "queued" || data.status === "crawling" || data.status === "generating" || data.status === "cancel_requested"
 
   let hostname = ""
   try {
@@ -62,12 +63,15 @@ export default function ResultPage({ params }: ResultPageProps) {
           {/* In progress */}
           {!error && isInProgress && (
             <Card>
-              <CardContent className="pt-6">
+              <CardContent className="pt-6 space-y-4">
                 <StatusIndicator
                   status={data?.status ?? "queued"}
                   url={data?.url ?? ""}
                   pageCount={data?.page_count}
                 />
+                {data?.status && data.status !== "cancel_requested" && (
+                  <CancelButton jobId={jobId} />
+                )}
               </CardContent>
             </Card>
           )}

@@ -52,6 +52,18 @@ export async function listJobs(): Promise<JobListItem[]> {
   return data
 }
 
+export async function cancelJob(jobId: string): Promise<void> {
+  const endpoint = `${API_BASE}/jobs/${jobId}/cancel`
+  log("POST", endpoint)
+  const res = await fetch(endpoint, { method: "POST" })
+  if (!res.ok) {
+    const text = await res.text()
+    log("POST", endpoint, res.status, text)
+    throw new Error(text || `Request failed with status ${res.status}`)
+  }
+  log("POST", endpoint, res.status)
+}
+
 export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
   const endpoint = `${API_BASE}/jobs/${jobId}`
   log("GET", endpoint)
