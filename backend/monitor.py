@@ -156,16 +156,21 @@ async def check_domain(domain: Domain, session) -> bool:
 
 
 async def _trigger_job(domain: Domain, session) -> None:
-    """Create a new Job and schedule _process_job as a background task."""
-    # Import here to avoid circular import (main imports monitor)
-    from main import _process_job
+    """Create a new Job and run it under the monitor semaphore."""
+    # Imported here to avoid circular import (main imports monitor)
+    from main import monitor_semaphore
+    from processor import JobProcessor
 
     job = Job(url=domain.base_url)
     session.add(job)
     await session.commit()
     await session.refresh(job)
 
-    asyncio.create_task(_process_job(job.id, domain.base_url, 2))
+    async def _run() -> None:
+        async with monitor_semaphore:
+            await JobProcessor(job.id, domain.base_url, 2).run()
+
+    asyncio.create_task(_run())
     logger.info("MONITOR  triggered job %s for %s", job.id, domain.base_url)
 
     domain.last_job_id = job.id

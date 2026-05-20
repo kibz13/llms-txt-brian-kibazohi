@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 import sys
 import time
@@ -29,7 +30,7 @@ from prefilter import (
 logger = logging.getLogger(__name__)
 
 PAGE_CAP              = 100   # default; overridden per-crawl by _depth_to_page_cap()
-MAX_CONCURRENT        = 10    # max parallel requests to a single domain
+MAX_CONCURRENT        = int(os.getenv("MAX_CONCURRENT", "10"))  # max parallel requests to a single domain
 SLOW_SITE_THRESHOLD_S = 10.0  # avg seconds/page → trigger slow-site cap
 SLOW_SITE_PAGE_CAP    = 20    # reduced cap for slow sites
 

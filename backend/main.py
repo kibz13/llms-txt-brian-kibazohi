@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import time
@@ -35,9 +36,12 @@ from repository import JobRepository
 
 logger = logging.getLogger(__name__)
 
-APP_ENV              = os.getenv("APP_ENV", "development")
-CRAWL_DEPTH          = int(os.getenv("CRAWL4AI_DEPTH", "2"))
-MONITOR_INTERVAL_HRS = int(os.getenv("MONITOR_INTERVAL_HOURS", "24"))
+APP_ENV                  = os.getenv("APP_ENV", "development")
+CRAWL_DEPTH              = int(os.getenv("CRAWL4AI_DEPTH", "2"))
+MONITOR_INTERVAL_HRS     = int(os.getenv("MONITOR_INTERVAL_HOURS", "24"))
+MONITOR_JOB_CONCURRENCY  = int(os.getenv("MONITOR_JOB_CONCURRENCY", "1"))
+
+monitor_semaphore = asyncio.Semaphore(MONITOR_JOB_CONCURRENCY)
 
 
 # ---------------------------------------------------------------------------

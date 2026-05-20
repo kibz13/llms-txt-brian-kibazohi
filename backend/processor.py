@@ -15,6 +15,7 @@ and is tracked as a future enhancement.
 
 import asyncio
 import logging
+import os
 import time
 from uuid import UUID
 
@@ -29,7 +30,7 @@ from scorer import score_all
 
 logger = logging.getLogger(__name__)
 
-JOB_TIMEOUT_S = 600  # 10 minutes
+JOB_TIMEOUT_S = int(os.getenv("JOB_TIMEOUT_S", "600"))  # 10 minutes
 
 
 class JobProcessor:
