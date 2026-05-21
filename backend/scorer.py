@@ -87,7 +87,7 @@ class PageSignals:
 class ScoredPage:
     page: CrawledPage
     page_type: str
-    score: int
+    score: float
     signals: PageSignals
 
 

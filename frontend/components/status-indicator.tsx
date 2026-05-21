@@ -37,10 +37,12 @@ function getStepStates(status: JobStatus): StepState[] {
     case "crawling":
       return ["active", "pending", "pending", "pending"]
     case "generating":
+    case "cancel_requested":
       return ["complete", "complete", "active", "pending"]
     case "done":
       return ["complete", "complete", "complete", "complete"]
     case "error":
+    case "cancelled":
       return ["pending", "pending", "pending", "pending"]
     default:
       return ["pending", "pending", "pending", "pending"]

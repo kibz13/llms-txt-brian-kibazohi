@@ -10,9 +10,8 @@ from uuid import UUID
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import field_validator
+from pydantic import BaseModel, field_validator
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -184,6 +183,8 @@ async def get_job(job_id: UUID, session: AsyncSession = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Job not found")
 
     if job.status == JobState.DONE:
+        if not job.result:
+            raise HTTPException(status_code=500, detail="Job completed but result is missing")
         return JobResult(
             job_id=job.id,
             status=job.status,
