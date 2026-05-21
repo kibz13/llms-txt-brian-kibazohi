@@ -8,7 +8,6 @@ import { cn } from "@/lib/utils"
 interface StatusIndicatorProps {
   status: JobStatus
   url: string
-  pageCount?: number | null
 }
 
 type StepState = "complete" | "active" | "pending"
@@ -196,7 +195,7 @@ function StepList({ states }: { states: StepState[] }) {
   )
 }
 
-function LivePanel({ status, url, pageCount }: StatusIndicatorProps) {
+function LivePanel({ status, url }: StatusIndicatorProps) {
   const logLines = useActivityLog(status)
   const isActive = status === "crawling" || status === "generating" || status === "queued"
 
@@ -211,12 +210,8 @@ function LivePanel({ status, url, pageCount }: StatusIndicatorProps) {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <div className="rounded-md border border-slate-100 bg-slate-50 px-3 py-2">
-          <p className="text-slate-400 mb-0.5">Pages discovered</p>
-          <p className="font-mono font-medium text-slate-700">{pageCount != null ? pageCount : "—"}</p>
-        </div>
-        <div className="rounded-md border border-slate-100 bg-slate-50 px-3 py-2">
+      <div className="text-xs">
+        <div className="rounded-md border border-slate-100 bg-slate-50 px-3 py-2 w-fit">
           <p className="text-slate-400 mb-0.5">Output</p>
           <p className="font-mono font-medium text-slate-700">llms.txt</p>
         </div>
@@ -234,13 +229,13 @@ function LivePanel({ status, url, pageCount }: StatusIndicatorProps) {
   )
 }
 
-export function StatusIndicator({ status, url, pageCount }: StatusIndicatorProps) {
+export function StatusIndicator({ status, url }: StatusIndicatorProps) {
   const states = getStepStates(status)
 
   return (
     <div className="grid gap-8 md:grid-cols-[240px_1fr]">
       <StepList states={states} />
-      <LivePanel status={status} url={url} pageCount={pageCount} />
+      <LivePanel status={status} url={url} />
     </div>
   )
 }

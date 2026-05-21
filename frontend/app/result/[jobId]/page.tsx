@@ -67,7 +67,6 @@ export default function ResultPage({ params }: ResultPageProps) {
                 <StatusIndicator
                   status={data?.status ?? "queued"}
                   url={data?.url ?? ""}
-                  pageCount={data?.page_count}
                 />
                 {data?.status && data.status !== "cancel_requested" && (
                   <CancelButton jobId={jobId} />
