@@ -100,15 +100,23 @@ class JobRepository:
     # ------------------------------------------------------------------
 
     async def upsert_domain(self, base_url: str, job_id: UUID) -> None:
-        """Register or update a Domain row for monitoring."""
-        domain_str = urlparse(base_url).netloc
-        result = await self.session.execute(select(Domain).where(Domain.base_url == base_url))
+        """Register or update a Domain row for monitoring.
+
+        Normalises www vs apex (www.example.com → example.com) so repeated
+        submissions with/without www resolve to the same domain row and appear
+        only once in the directory.
+        """
+        parsed     = urlparse(base_url)
+        netloc     = parsed.netloc.removeprefix("www.")
+        canonical  = parsed._replace(netloc=netloc).geturl()
+
+        result = await self.session.execute(select(Domain).where(Domain.base_url == canonical))
         existing = result.scalars().first()
 
         if existing:
             existing.last_job_id = job_id
             existing.updated_at  = _now()
         else:
-            self.session.add(Domain(base_url=base_url, domain=domain_str, last_job_id=job_id))
+            self.session.add(Domain(base_url=canonical, domain=netloc, last_job_id=job_id))
 
         await self.session.commit()
