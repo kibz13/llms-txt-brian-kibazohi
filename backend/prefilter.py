@@ -88,7 +88,9 @@ def normalise_url(url: str) -> str:
 
 
 def same_domain(base: str, url: str) -> bool:
-    return urlparse(url).netloc == urlparse(base).netloc
+    def _root(netloc: str) -> str:
+        return netloc.removeprefix("www.")
+    return _root(urlparse(url).netloc) == _root(urlparse(base).netloc)
 
 
 # ---------------------------------------------------------------------------

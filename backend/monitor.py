@@ -11,6 +11,7 @@ Change detection strategy (in priority order):
 import asyncio
 import hashlib
 import logging
+import os
 from urllib.parse import urlparse
 
 import httpx
@@ -23,7 +24,7 @@ from scorer import OPTIONAL_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
-WATCHLIST_SIZE = 5   # max pages to HEAD-check per domain (must score >= OPTIONAL_THRESHOLD)
+WATCHLIST_SIZE = int(os.getenv("WATCHLIST_SIZE", "5"))  # max pages to HEAD-check per domain (must score >= OPTIONAL_THRESHOLD)
 
 
 # ---------------------------------------------------------------------------

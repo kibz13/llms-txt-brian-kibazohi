@@ -109,6 +109,16 @@ def test_same_domain_false():
     assert not same_domain("https://example.com", "https://other.com/page")
 
 
+def test_same_domain_www_vs_apex():
+    # Submitted URL has www, sitemap URLs use apex — must match
+    assert same_domain("https://www.openai.com", "https://openai.com/blog/post")
+
+
+def test_same_domain_apex_vs_www():
+    # Submitted URL is apex, sitemap uses www — must match
+    assert same_domain("https://openai.com", "https://www.openai.com/about")
+
+
 # ---------------------------------------------------------------------------
 # should_skip
 # ---------------------------------------------------------------------------
